@@ -53,6 +53,6 @@
     <maven.compiler.target>19</maven.compiler.target>
     <maven.compiler.source>19</maven.compiler.source>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <kzen.version>0.27.0</kzen.version>
+    <kzen.version>0.28.0</kzen.version>
   </properties>
 </project>
