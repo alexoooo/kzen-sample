@@ -13,8 +13,7 @@
     <properties>
         <kzen.version>0.28.0</kzen.version>
 
-        <maven.compiler.source>19</maven.compiler.source>
-        <maven.compiler.target>19</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -40,7 +39,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.11.0</version>
+                    <version>3.13.0</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -54,13 +53,15 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1</version>
+                <version>3.5.3</version>
                 <configuration>
+                    <minimizeJar>true</minimizeJar>
                     <filters>
                         <filter>
                             <artifact>*:*</artifact>
                             <excludes>
-                                <exclude>META-INF/**</exclude>
+                                <exclude>META-INF/*.MF</exclude>
+                                <exclude>META-INF/versions/**</exclude>
                             </excludes>
                         </filter>
                     </filters>
@@ -71,9 +72,6 @@
                         <goals>
                             <goal>shade</goal>
                         </goals>
-                        <configuration>
-                            <!--<minimizeJar>true</minimizeJar>-->
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>
