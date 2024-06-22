@@ -53,6 +53,6 @@
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <kzen.version>0.28.0</kzen.version>
+    <kzen.version>0.28.1</kzen.version>
   </properties>
 </project>
