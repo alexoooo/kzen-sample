@@ -13,7 +13,7 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
 
-        <kzen.version>0.29.0-SNAPSHOT</kzen.version>
+        <kzen.version>0.29.1-SNAPSHOT</kzen.version>
 
         <guava.version>33.5.0-jre</guava.version>
 
