@@ -13,9 +13,11 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
 
-        <kzen.version>0.29.1-SNAPSHOT</kzen.version>
+        <kzen.version>0.30.0-SNAPSHOT</kzen.version>
+        <kotlin.version>2.4.0</kotlin.version>
+        <jetbrains.annotations.version>23.0.0</jetbrains.annotations.version>
 
-        <guava.version>33.5.0-jre</guava.version>
+        <guava.version>33.6.0-jre</guava.version>
 
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
         <maven-resources-plugin.version>3.4.0</maven-resources-plugin.version>
@@ -26,6 +28,22 @@
         <!--<maven.compiler.release>21</maven.compiler.release>-->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
+
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib</artifactId>
+                <version>${kotlin.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains</groupId>
+                <artifactId>annotations</artifactId>
+                <version>${jetbrains.annotations.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
 
     <dependencies>
