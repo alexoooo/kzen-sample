@@ -1,0 +1,16 @@
+# Store-backed book history: the displayed book of every symbol-day sampled once a second, one level deep
+# (best bid / ask, spread, depth) — the persistent snapshots share structure, so nothing is copied.
+main:
+  is: Job
+
+main.workers/SymbolDays:
+  is: FormulaSourceWorker
+  code: 'tech.kzen.sample.itch.day.SymbolDays.of(tech.kzen.sample.itch.store.ItchDataArea(java.nio.file.Path.of("data/kzen-sample")).ensureStore(java.nio.file.Path.of("data/kzen-sample/synthetic-day.itch"), tech.kzen.sample.itch.store.ItchStoreBuilder()))'
+
+main.workers/Book:
+  is: SymbolDayBookSnapshotWorker
+  intervalMillis: 1000
+  levels: 1
+
+main.workers/Preview:
+  is: PreviewWorker

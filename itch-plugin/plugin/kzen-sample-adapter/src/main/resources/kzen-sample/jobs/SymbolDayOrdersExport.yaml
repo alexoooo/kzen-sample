@@ -1,0 +1,32 @@
+# Object-graph projection and export: the reconstructed OrderLifecycle records as they are (enums, the event
+# list), projected by the host's path picker to the leaves below and exported as CSV. Open the Paths card to
+# pick others; the `events` list is offered as a list, but its elements (a sealed interface of event records)
+# are opaque to the static walk, so an event's own fields cannot be projected yet.
+main:
+  is: Job
+
+main.workers/SymbolDays:
+  is: FormulaSourceWorker
+  code: 'tech.kzen.sample.itch.day.SymbolDays.of(tech.kzen.sample.itch.store.ItchDataArea(java.nio.file.Path.of("data/kzen-sample")).ensureStore(java.nio.file.Path.of("data/kzen-sample/synthetic-day.itch"), tech.kzen.sample.itch.store.ItchStoreBuilder()))'
+
+main.workers/Orders:
+  is: SymbolDayOrdersWorker
+
+main.workers/Paths:
+  is: PathProjectionWorker
+  paths:
+    - reference
+    - side
+    - originalShares
+    - price
+    - state
+    - remainingShares
+    - replacedFrom
+    - addTimestampNanos
+
+main.workers/Export:
+  is: ExportWriterWorker
+  export:
+    format: csv
+    compression: none
+    path: data/kzen-sample/out/symbol-day-order-events.csv

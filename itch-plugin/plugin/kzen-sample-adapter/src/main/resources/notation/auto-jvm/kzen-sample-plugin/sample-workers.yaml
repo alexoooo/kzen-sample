@@ -1,0 +1,122 @@
+# The sample plugin's analytical Workers: thin Java classes over the plain core (JavaTransformWorker, HS11),
+# served by the host's reflective mirror (@Reflect, one constructor, javac -parameters) — no plugin JS, the
+# generic Worker card shows each one's static output columns. Bundled notation, so every workspace this plugin
+# folder is installed in can place them; ready-made Jobs using them ship as templates under
+# kzen-sample/jobs/ in the adapter jar (copy into a project's notation/main/).
+
+# Raw-ingestion route: decoded ItchMessage elements (an expression source over the core's ItchReader) folded by
+# the core's TradeVolumeFold; one row per symbol at end of stream.
+ItchTradeVolumeWorker:
+  abstract: true
+  is: Worker
+  title: "ITCH trade volume"
+  class: tech.kzen.sample.plugin.analysis.ItchTradeVolumeWorker
+  input: ""
+  output: ""
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self
+
+
+# Store-backed route: materialized SymbolDay elements (SymbolDays.of(store) from an expression source, each
+# owned and closed by the run) — one trade-volume row per symbol-day, from its graph.
+SymbolDayTradeVolumeWorker:
+  abstract: true
+  is: Worker
+  title: "Symbol-day trade volume"
+  class: tech.kzen.sample.plugin.analysis.SymbolDayTradeVolumeWorker
+  input: ""
+  output: ""
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self
+
+
+# One flat row per reconstructed order: side, size, price, state, executed shares and executions, fill ratio,
+# resting time, the replaced reference.
+SymbolDayOrderLifecycleWorker:
+  abstract: true
+  is: Worker
+  title: "Symbol-day order lifecycle"
+  class: tech.kzen.sample.plugin.analysis.SymbolDayOrderLifecycleWorker
+  input: ""
+  output: ""
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self
+
+
+# The displayed book sampled every `intervalMillis`, `levels` deep per side: best bid / ask, spread, depth.
+SymbolDayBookSnapshotWorker:
+  abstract: true
+  is: Worker
+  title: "Symbol-day book snapshots"
+  class: tech.kzen.sample.plugin.analysis.SymbolDayBookSnapshotWorker
+  input: ""
+  output: ""
+  intervalMillis: 1000
+  levels: 1
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    intervalMillis: Int
+    levels: Int
+    selfLocation:
+      is: ObjectLocation
+      by: Self
+
+
+# The reconstructed OrderLifecycle records themselves (an object graph: enums, the event list with its variants)
+# for the host's path projection and export.
+SymbolDayOrdersWorker:
+  abstract: true
+  is: Worker
+  title: "Symbol-day orders"
+  class: tech.kzen.sample.plugin.analysis.SymbolDayOrdersWorker
+  input: ""
+  output: ""
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self

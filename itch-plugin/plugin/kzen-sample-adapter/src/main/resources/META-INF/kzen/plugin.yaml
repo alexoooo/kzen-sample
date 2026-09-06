@@ -1,0 +1,4 @@
+# Folder-plugin metadata (optional; never a class list — readers are found through META-INF/services).
+id: kzen-sample
+version: 0.0.1
+spi: 1

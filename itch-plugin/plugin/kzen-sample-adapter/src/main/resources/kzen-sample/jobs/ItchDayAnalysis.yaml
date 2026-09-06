@@ -1,0 +1,46 @@
+# File / reader route, plugin code only in the reader: the day file read as flat typed rows through the ITCH
+# reader (automatic detection, or pick "NASDAQ ITCH 5.0 day" in Advanced → Format), print rows kept, an
+# hour-of-day and a printed-shares column added (E / C carry executed shares, P / Q their own), and shares
+# aggregated by symbol and hour into a CSV — generic Workers over flat rows. It counts every print row; the
+# oracle-grade tally (breaks subtracted, non-printable executions dropped) needs the message graph, which is
+# the ItchRawIngestion and SymbolDay routes. Copy into a project's notation/main/ and point the location at
+# the day file (a .gz works through the gzip content coding).
+main:
+  is: Job
+
+main.workers/File:
+  is: FileSourceWorker
+  files:
+    - location: data/kzen-sample/synthetic-day.itch
+
+main.workers/Prints:
+  is: ValueSetFilterWorker
+  filter:
+    "0|type":
+      type: RequireAny
+      values:
+        - P
+        - E
+        - C
+        - Q
+
+main.workers/Hour:
+  is: FormulaWorker
+  formula:
+    hour: "timestampNanos / 3_600_000_000_000L"
+    printed: '(if (type == "E" || type == "C") executedShares else shares) ?: 0L'
+
+main.workers/BySymbolAndHour:
+  is: PivotWorker
+  pivot:
+    rows:
+      - "0|stock"
+      - "0|hour"
+    values:
+      "0|printed":
+        - Count
+        - Sum
+
+main.workers/Csv:
+  is: CsvWriterWorker
+  path: data/kzen-sample/out/itch-day-by-symbol-hour.csv

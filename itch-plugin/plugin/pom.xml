@@ -8,25 +8,33 @@
     <groupId>tech.kzen.sample.plugin</groupId>
     <artifactId>kzen-sample-plugin</artifactId>
     <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+
+    <!-- Two modules on purpose: the core is plain Java with no kzen dependency at all (a build-level proof that a
+         library never written for kzen can be used from it), and the adapter is the thin kzen plugin over it. -->
+    <modules>
+        <module>kzen-sample-core</module>
+        <module>kzen-sample-adapter</module>
+    </modules>
 
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <kzen.version>0.30.0-SNAPSHOT</kzen.version>
         <kotlin.version>2.4.0</kotlin.version>
         <jetbrains.annotations.version>23.0.0</jetbrains.annotations.version>
-
         <guava.version>33.6.0-jre</guava.version>
+        <junit.version>6.1.1</junit.version>
 
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
         <maven-resources-plugin.version>3.4.0</maven-resources-plugin.version>
         <maven-dependency-plugin.version>3.9.0</maven-dependency-plugin.version>
         <maven-jar-plugin.version>3.5.0</maven-jar-plugin.version>
+        <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
         <maven-enforcer-plugin.version>3.6.2</maven-enforcer-plugin.version>
-
-        <!--<maven.compiler.release>21</maven.compiler.release>-->
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
 
@@ -42,23 +50,14 @@
                 <artifactId>annotations</artifactId>
                 <version>${jetbrains.annotations.version}</version>
             </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
-
-
-    <dependencies>
-        <dependency>
-            <groupId>tech.kzen.auto</groupId>
-            <artifactId>kzen-auto-plugin</artifactId>
-            <version>${kzen.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
-            <version>${guava.version}</version>
-        </dependency>
-    </dependencies>
 
 
     <build>
@@ -74,70 +73,25 @@
                     <artifactId>maven-resources-plugin</artifactId>
                     <version>${maven-resources-plugin.version}</version>
                 </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>${maven-jar-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-dependency-plugin</artifactId>
+                    <version>${maven-dependency-plugin.version}</version>
+                </plugin>
             </plugins>
         </pluginManagement>
 
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-dependency-plugin</artifactId>
-                <version>${maven-dependency-plugin.version}</version>
-                <configuration>
-                    <outputDirectory>${project.build.directory}/lib</outputDirectory>
-                    <excludeTransitive>false</excludeTransitive>
-                    <stripVersion>false</stripVersion>
-                    <includeScope>runtime</includeScope>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>copy-dependencies</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>copy-dependencies</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>${maven-jar-plugin.version}</version>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <addClasspath>true</addClasspath>
-                            <classpathPrefix>lib/</classpathPrefix>
-                            <!--<mainClass>${main.class}</mainClass>-->
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
-            <!--<plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.6.1</version>
-                <configuration>
-                    <minimizeJar>true</minimizeJar>
-                    <filters>
-                        <filter>
-                            <artifact>*:*</artifact>
-                            <excludes>
-                                <exclude>META-INF/*.MF</exclude>
-                                <exclude>META-INF/versions/**</exclude>
-                            </excludes>
-                        </filter>
-                    </filters>
-                </configuration>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>-->
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

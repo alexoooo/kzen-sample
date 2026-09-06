@@ -1,0 +1,86 @@
+package tech.kzen.sample.itch.day;
+
+import tech.kzen.sample.itch.store.ItchStore;
+
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
+
+/**
+ * Lazily materialized symbol-days of a store in lexical symbol order, one at a time, each acquired from
+ * [budget] on {@code next()}. The stream itself is closeable and single-use: {@link #iterator} may be called
+ * once, iteration after {@link #close} fails by name, and the days it hands out belong to the caller, who
+ * closes each (the framework's E9 ownership does this on the kzen route). Closing the stream does not close a
+ * day already handed out.
+ */
+public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
+    private final ItchStore store;
+    private final MaterializationBudget budget;
+    private final MaterializationWeight.Coefficients coefficients;
+    private boolean iterated;
+    private volatile boolean closed;
+
+
+    public static SymbolDays of(ItchStore store) {
+        return of(store, MaterializationBudget.unlimited());
+    }
+
+    public static SymbolDays of(ItchStore store, MaterializationBudget budget) {
+        return new SymbolDays(store, budget, MaterializationWeight.Coefficients.measured);
+    }
+
+    public SymbolDays(ItchStore store, MaterializationBudget budget, MaterializationWeight.Coefficients coefficients) {
+        this.store = store;
+        this.budget = budget;
+        this.coefficients = coefficients;
+    }
+
+
+    @Override
+    public synchronized Iterator<SymbolDay> iterator() {
+        if (closed) {
+            throw new IllegalStateException("SymbolDays of " + store.root() + " is closed");
+        }
+        if (iterated) {
+            throw new IllegalStateException("SymbolDays of " + store.root() + " is single-use");
+        }
+        iterated = true;
+        Iterator<Integer> locates = store.symbols().values().iterator();
+        return new Iterator<>() {
+            @Override
+            public boolean hasNext() {
+                return !closed && locates.hasNext();
+            }
+
+            @Override
+            public SymbolDay next() {
+                if (closed) {
+                    throw new IllegalStateException("SymbolDays of " + store.root() + " is closed");
+                }
+                if (!locates.hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                try {
+                    return SymbolDay.materialize(store, locates.next(), budget, coefficients);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while materializing", e);
+                }
+            }
+        };
+    }
+
+
+    public Stream<SymbolDay> stream() {
+        return StreamSupport.stream(spliterator(), false).onClose(this::close);
+    }
+
+
+    @Override
+    public void close() {
+        closed = true;
+    }
+}
