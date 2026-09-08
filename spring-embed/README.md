@@ -11,12 +11,20 @@ Open http://127.0.0.1:18280/ and choose **trading** or **risk**.
 ## Analyze a day
 
 1. Open or create a Job. Choose **ITCH** in its **Sources** palette and insert the source.
-2. Select one or more dates. The table shows downloaded files, sizes, source URLs, and preparation status. **Refresh dates** reloads the Nasdaq public sample catalog.
-3. Click **Download and prepare selected**. Existing downloads and fresh analysis stores are reused. Each file shows download progress, verification, and store preparation. Cancellation retains completed files; the same button retries failed or cancelled preparation.
-4. Leave **Symbols: All**, or search and select symbols such as AAPL or QQQ. Choices appear after preparation. Missing symbol/date combinations are shown and skipped.
+2. Expand **Dates** and select one or more dates. Filter to **Selected**, **Downloaded**, or **All**, or search by date. Expand a date’s **Source** for its filename and URL. **Refresh dates** reloads the Nasdaq public sample catalog.
+3. Click **Download and prepare**. Existing downloads and fresh analysis stores are reused. Each file shows download progress, verification, and store preparation. Cancellation retains completed files; the same button retries failed or cancelled preparation.
+4. Leave **All symbols**, or expand **Symbols** to search and select symbols such as AAPL or QQQ. Choices appear after preparation. Missing symbol/date combinations are shown and skipped.
 5. Add **ITCH trade volume** or **ITCH orders** from the transforms palette, followed by a Preview or CSV writer, then run the Job.
 
 The source emits a typed dated symbol-day with `date`, `symbol`, `sourceUrl`, and `day`. Trade volume produces `date`, `symbol`, `tradeEvents`, and `shares`. Orders produce `date`, `symbol`, and a typed `order` with its lifecycle fields. The type display and field picker are available before running. A native symbol-day stays alive while downstream processing uses it; scalar summaries release its memory.
+
+A configured source starts compact, showing selected dates, readiness, and symbols. Expand **Dates** or **Symbols** when editing. Preparation progress and failures remain visible when collapsed.
+
+Expand a type summary to inspect its field tree. The **Stream item** is one emitted value; secondary JVM badges describe how those same fields are represented in the host. **Technical details** contains full type names and schema diagnostics.
+
+You can also connect ITCH directly to **Preview**. Each row shows `date`, `symbol`, `sourceUrl`, and expandable `day.open`, the fields exposed by the existing contract. Preview captures values while the symbol-day is alive, so cells remain readable after the native memory is released. Trades and orders are exposed through their transforms.
+
+Preview retains a rolling sample bounded by both the configured item count and 8 MiB of encoded content. Each item is limited to 256 KiB, 16 levels, 200 children per container, 2,000 visited nodes, 4,096 characters per text value, and a 64-byte binary excerpt. Capture checks a 50 ms deadline between reads; it cannot interrupt a blocking getter. Unavailable or omitted branches are marked without hiding readable siblings. Expanding a cell reads only captured content.
 
 Dates and symbols are saved in the Job. They are fixed during a run; stop and start a new run to change them. Downloads run independently of Jobs and are shared by both workspaces.
 

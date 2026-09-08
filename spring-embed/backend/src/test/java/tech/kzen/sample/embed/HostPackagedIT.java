@@ -99,6 +99,19 @@ class HostPackagedIT {
                   is: CsvWriterWorker
                   path: '%s'
                 """.formatted(catalogCsv.toString().replace('\\', '/')));
+        Files.writeString(riskNotation.resolve("CatalogPreview.yaml"), """
+                main:
+                  is: Job
+                main.workers/Itch:
+                  is: ItchSourceWorker
+                  selection:
+                    - 12302019.NASDAQ_ITCH50.gz
+                    - 01302020.NASDAQ_ITCH50.gz
+                  symbols:
+                    - AAPL
+                main.workers/Preview:
+                  is: PreviewWorker
+                """);
         hostPort = freePort();
         tradingPort = freePort();
         riskPort = freePort();
@@ -246,6 +259,30 @@ class HostPackagedIT {
         String budget = get("/kzen-host/budget").body();
         assertTrue(budget.contains("\"outstandingItems\":0"), budget);
         assertTrue(budget.contains("\"leaks\":0"), budget);
+        deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        while (!get("/kzen/risk/logic/status").body().contains("\"active\":null") && System.nanoTime() < deadline) Thread.sleep(50);
+        get("/kzen/risk/action/detached?path=auto-jvm%2Flogic%2Flogic-trace.yaml&object=LogicTraceEndpoint&action=reset-all");
+        HttpResponse<String> previewRun = get("/kzen/risk/logic/startRun?path=main%2FCatalogPreview.yaml&object=main");
+        assertEquals(200, previewRun.statusCode(), previewRun.body());
+        deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        String status;
+        do {
+            status = get("/kzen/risk/logic/status").body();
+            if (status.contains("\"active\":null")) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertTrue(status.contains("\"active\":null"), status);
+        String trace = get("/kzen/risk/action/detached?path=auto-jvm%2Flogic%2Flogic-trace.yaml"
+                + "&object=LogicTraceEndpoint&action=lookup-run&query=%2F&run="
+                + java.net.URLEncoder.encode(previewRun.body().trim().replace("\"", ""), StandardCharsets.UTF_8)).body();
+        assertTrue(trace.contains("previewItems"), trace);
+        assertTrue(trace.contains("2019-12-30") && trace.contains("2020-01-30"), trace);
+        assertTrue(trace.contains("open") && trace.contains("true"), trace);
+        assertFalse(trace.contains("scalar is valid only") || trace.contains("Could not read"), trace);
+        budget = get("/kzen-host/budget").body();
+        assertTrue(budget.contains("\"outstandingItems\":0"), budget);
+        assertTrue(budget.contains("\"leaks\":0"), budget);
+
     }
 
 
