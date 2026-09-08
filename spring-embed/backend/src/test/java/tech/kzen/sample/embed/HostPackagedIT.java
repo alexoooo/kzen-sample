@@ -1,5 +1,11 @@
 package tech.kzen.sample.embed;
 
+import kotlinx.serialization.json.Json;
+import kotlinx.serialization.json.JsonArray;
+import kotlinx.serialization.json.JsonElement;
+import kotlinx.serialization.json.JsonObject;
+import kotlinx.serialization.json.JsonPrimitive;
+import tech.kzen.auto.common.objects.document.job.preview.PreviewNode;
 import org.junit.jupiter.api.AfterAll;
 import tech.kzen.sample.itch.synth.SyntheticItchDay;
 import org.junit.jupiter.api.BeforeAll;
@@ -109,6 +115,14 @@ class HostPackagedIT {
                     - 01302020.NASDAQ_ITCH50.gz
                   symbols:
                     - AAPL
+                main.workers/Formula:
+                  is: FormulaWorker
+                  formula:
+                    test: symbol.length
+                main.workers/Next:
+                  is: FormulaWorker
+                  formula:
+                    checked: test == symbol.length && day.isOpen()
                 main.workers/Preview:
                   is: PreviewWorker
                 """);
@@ -276,6 +290,16 @@ class HostPackagedIT {
                 + "&object=LogicTraceEndpoint&action=lookup-run&query=%2F&run="
                 + java.net.URLEncoder.encode(previewRun.body().trim().replace("\"", ""), StandardCharsets.UTF_8)).body();
         assertTrue(trace.contains("previewItems"), trace);
+        List<PreviewNode> previewItems = new ArrayList<>();
+        collectPreviewItems(Json.Default.parseToJsonElement(trace), previewItems);
+        assertEquals(2, previewItems.size(), trace);
+        for (PreviewNode item : previewItems) {
+            assertEquals("4", previewField(item, "test").getText());
+            assertEquals("true", previewField(item, "checked").getText());
+            assertEquals("AAPL", previewField(item, "symbol").getText());
+            assertEquals("true", previewField(previewField(item, "day"), "open").getText());
+        }
+        assertFalse(trace.contains("Native metadata path does not exist"), trace);
         assertTrue(trace.contains("2019-12-30") && trace.contains("2020-01-30"), trace);
         assertTrue(trace.contains("open") && trace.contains("true"), trace);
         assertFalse(trace.contains("scalar is valid only") || trace.contains("Could not read"), trace);
@@ -283,6 +307,29 @@ class HostPackagedIT {
         assertTrue(budget.contains("\"outstandingItems\":0"), budget);
         assertTrue(budget.contains("\"leaks\":0"), budget);
 
+    }
+
+
+    private static void collectPreviewItems(JsonElement element, List<PreviewNode> items) {
+        if (element instanceof JsonObject object) {
+            for (var entry : object.entrySet()) {
+                if (entry.getKey().equals("previewItems")) {
+                    JsonArray array = (JsonArray) ((JsonObject) entry.getValue()).get("value");
+                    for (JsonElement item : array) {
+                        items.add(PreviewNode.Companion.decode(((JsonPrimitive) item).getContent()));
+                    }
+                } else {
+                    collectPreviewItems(entry.getValue(), items);
+                }
+            }
+        } else if (element instanceof JsonArray array) {
+            for (JsonElement child : array) collectPreviewItems(child, items);
+        }
+    }
+
+    private static PreviewNode previewField(PreviewNode item, String name) {
+        return item.getChildren().stream().filter(child -> child.getName().equals(name)).findFirst()
+                .orElseThrow(() -> new AssertionError("Missing " + name + " in " + item));
     }
 
 

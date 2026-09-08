@@ -24,6 +24,8 @@ Expand a type summary to inspect its field tree. The **Stream item** is one emit
 
 You can also connect ITCH directly to **Preview**. Each row shows `date`, `symbol`, `sourceUrl`, and expandable `day.open`, the fields exposed by the existing contract. Preview captures values while the symbol-day is alive, so cells remain readable after the native memory is released. Trades and orders are exposed through their transforms.
 
+To add a column, place **Formula** between ITCH and Preview, add `test` with expression `symbol.length`, and leave **Payload** blank. The output retains `date`, `symbol`, `sourceUrl`, and the live `day` object alongside the typed calculated column. Later Formula steps can read both the original fields and `test`. **Carry** is only needed when a Payload expression replaces the object; choose None, All, or Selected fields with optional renames.
+
 Preview retains a rolling sample bounded by both the configured item count and 8 MiB of encoded content. Each item is limited to 256 KiB, 16 levels, 200 children per container, 2,000 visited nodes, 4,096 characters per text value, and a 64-byte binary excerpt. Capture checks a 50 ms deadline between reads; it cannot interrupt a blocking getter. Unavailable or omitted branches are marked without hiding readable siblings. Expanding a cell reads only captured content.
 
 Dates and symbols are saved in the Job. They are fixed during a run; stop and start a new run to change them. Downloads run independently of Jobs and are shared by both workspaces.
