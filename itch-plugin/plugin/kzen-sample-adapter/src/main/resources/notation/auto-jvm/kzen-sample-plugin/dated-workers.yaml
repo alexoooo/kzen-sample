@@ -1,0 +1,39 @@
+DatedTradeVolumeWorker:
+  abstract: true
+  is: Worker
+  title: "ITCH trade volume"
+  class: tech.kzen.sample.plugin.analysis.dated.DatedTradeVolumeWorker
+  input: ""
+  output: ""
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self
+
+DatedOrdersWorker:
+  abstract: true
+  is: Worker
+  title: "ITCH orders"
+  class: tech.kzen.sample.plugin.analysis.dated.DatedOrdersWorker
+  input: ""
+  output: ""
+  meta:
+    input:
+      is: ChannelInput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self

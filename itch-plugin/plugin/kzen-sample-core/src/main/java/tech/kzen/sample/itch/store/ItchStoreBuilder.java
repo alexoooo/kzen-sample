@@ -76,7 +76,7 @@ public final class ItchStoreBuilder {
      * Test seam: [proceed] is consulted with each message's ordinal before it is appended, so a mid-build failure
      * can be injected deterministically; returning false aborts the build.
      */
-    StoreManifest build(Path source, Path store, LongPredicate proceed) {
+    public StoreManifest build(Path source, Path store, LongPredicate proceed) {
         Path root = store.toAbsolutePath().normalize();
         String token = ProcessHandle.current().pid() + "-" + UUID.randomUUID();
         Path version = root.resolve(StoreFormat.versionDirectoryPrefix + token);
