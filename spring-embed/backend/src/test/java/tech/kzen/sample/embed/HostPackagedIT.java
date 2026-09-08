@@ -1,6 +1,7 @@
 package tech.kzen.sample.embed;
 
 import org.junit.jupiter.api.AfterAll;
+import tech.kzen.sample.itch.synth.SyntheticItchDay;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -54,6 +55,7 @@ class HostPackagedIT {
     private static int hostPort;
     private static int tradingPort;
     private static int riskPort;
+    private static Path catalogCsv;
 
 
     @BeforeAll
@@ -76,6 +78,27 @@ class HostPackagedIT {
                 main.workers/Preview:
                   is: PreviewWorker
                 """);
+        Path sources = Files.createDirectories(home.resolve("data/sources"));
+        SyntheticItchDay.generate(41, 20).writeTo(sources.resolve("12302019.NASDAQ_ITCH50.gz"), true);
+        SyntheticItchDay.generate(42, 20).writeTo(sources.resolve("01302020.NASDAQ_ITCH50.gz"), true);
+        catalogCsv = temp.resolve("dated-volume.csv");
+        Path riskNotation = Files.createDirectories(home.resolve("risk/src/main/resources/notation/main"));
+        Files.writeString(riskNotation.resolve("Catalog.yaml"), """
+                main:
+                  is: Job
+                main.workers/Itch:
+                  is: ItchSourceWorker
+                  selection:
+                    - 12302019.NASDAQ_ITCH50.gz
+                    - 01302020.NASDAQ_ITCH50.gz
+                  symbols:
+                    - AAPL
+                main.workers/Volume:
+                  is: DatedTradeVolumeWorker
+                main.workers/Csv:
+                  is: CsvWriterWorker
+                  path: '%s'
+                """.formatted(catalogCsv.toString().replace('\\', '/')));
         hostPort = freePort();
         tradingPort = freePort();
         riskPort = freePort();
@@ -183,6 +206,51 @@ class HostPackagedIT {
 
     @Test
     @Order(3)
+    void catalogPreparesAndRunsDatedTypedAnalysisThroughTheProxy() throws Exception {
+        String action = "/kzen/risk/action/detached?path=auto-jvm%2Fdatasource%2Fcatalog-source.yaml"
+                + "&object=CatalogActions&source=main%2FCatalog.yaml%23main.workers%2FItch";
+        HttpResponse<String> listed = get(action + "&action=list");
+        assertEquals(200, listed.statusCode(), listed.body());
+        assertTrue(listed.body().contains("2019-12-30"), listed.body());
+        String selection = java.net.URLEncoder.encode(
+                "[\"12302019.NASDAQ_ITCH50.gz\",\"01302020.NASDAQ_ITCH50.gz\"]", StandardCharsets.UTF_8);
+        String validator = "/kzen/risk/action/detached?path=auto-jvm%2Fjob%2Fjob-jvm.yaml&object=JobValidator&host=main%2FCatalog.yaml";
+        String beforePreparation = get(validator).body();
+        assertTrue(beforePreparation.contains("DatedSymbolDay"), beforePreparation);
+        assertFalse(beforePreparation.contains("before running"), beforePreparation);
+        HttpResponse<String> preparing = get(action + "&action=prepare&selection=" + selection);
+        assertEquals(200, preparing.statusCode(), preparing.body());
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        String ready;
+        do {
+            ready = get(action + "&action=list").body();
+            if (ready.contains("Ready for analysis") && !ready.contains("preparing") && !ready.contains("queued")) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertTrue(ready.contains("Ready for analysis"), ready);
+        HttpResponse<String> validation = get("/kzen/risk/action/detached?path=auto-jvm%2Fjob%2Fjob-jvm.yaml&object=JobValidator&host=main%2FCatalog.yaml");
+        assertTrue(validation.body().contains("DatedSymbolDay"), validation.body());
+        HttpResponse<String> run = get("/kzen/risk/logic/startRun?path=main%2FCatalog.yaml&object=main");
+        assertEquals(200, run.statusCode(), run.body());
+        deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        while ((!Files.exists(catalogCsv) || Files.readAllLines(catalogCsv).size() < 3) && System.nanoTime() < deadline) Thread.sleep(50);
+        List<String> rows = Files.readAllLines(catalogCsv);
+        assertEquals(3, rows.size(), String.join("\n", rows));
+        assertEquals("date,symbol,tradeEvents,shares", rows.getFirst());
+        var first = SyntheticItchDay.generate(41, 20).expectedTrades().get("AAPL");
+        var second = SyntheticItchDay.generate(42, 20).expectedTrades().get("AAPL");
+        assertEquals("2019-12-30,AAPL," + first.tradeEvents() + "," + first.shares(), rows.get(1));
+        assertEquals("2020-01-30,AAPL," + second.tradeEvents() + "," + second.shares(), rows.get(2));
+        assertEquals(200, get("/host/book/AAPL?date=2019-12-30&levels=1").statusCode());
+        awaitStat("activeStreams", 0, Duration.ofSeconds(5));
+        String budget = get("/kzen-host/budget").body();
+        assertTrue(budget.contains("\"outstandingItems\":0"), budget);
+        assertTrue(budget.contains("\"leaks\":0"), budget);
+    }
+
+
+    @Test
+    @Order(4)
     void stoppingOneWorkspaceLeavesTheOtherServing() throws Exception {
         HttpResponse<String> stopped = http.send(HttpRequest.newBuilder(uri("/kzen-host/workspaces/risk")).DELETE().build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -200,7 +268,7 @@ class HostPackagedIT {
 
 
     @Test
-    @Order(4)
+    @Order(5)
     void secondWorkspaceSharingTheFirstsWorkRootFailsByNameAndRollsBack() throws Exception {
         Path home = temp.resolve("same-root");
         Path log = temp.resolve("same-root.log");
@@ -217,7 +285,7 @@ class HostPackagedIT {
 
 
     @Test
-    @Order(5)
+    @Order(6)
     void secondWorkspaceOnTheFirstsPortFailsToBindAndRollsBack() throws Exception {
         Path home = temp.resolve("same-port");
         Path log = temp.resolve("same-port.log");
@@ -243,6 +311,7 @@ class HostPackagedIT {
                 "-jar", hostJar.toString(),
                 "--server.port=" + port,
                 "--kzen.home=" + home,
+                "--kzen.host.data-root=" + home.resolve("data"),
                 "--kzen.workspaces[0].name=trading", "--kzen.workspaces[0].port=" + trading,
                 "--kzen.workspaces[1].name=risk", "--kzen.workspaces[1].port=" + risk));
         command.addAll(List.of(extra));

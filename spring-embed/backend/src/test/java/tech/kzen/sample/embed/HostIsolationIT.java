@@ -254,6 +254,7 @@ class HostIsolationIT {
                 "-jar", hostJar.toString(),
                 "--server.port=" + port,
                 "--kzen.home=" + home,
+                "--kzen.host.data-root=" + home.resolve("data"),
                 "--kzen.workspaces[0].name=trading", "--kzen.workspaces[0].port=" + trading,
                 "--kzen.workspaces[1].name=risk", "--kzen.workspaces[1].port=" + risk));
         command.addAll(List.of(extra));

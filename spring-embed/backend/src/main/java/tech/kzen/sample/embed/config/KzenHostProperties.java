@@ -32,12 +32,12 @@ public record KzenHostProperties(
 
     /**
      * The host's own domain services: the ITCH day file they load (optional; without it the services report
-     * "no day"), the durable data area for the derived store (default {@code <home>/data}), and the weighted
+     * "no day"), the durable data area for the derived store (default {@code <user.home>/kzen-data/itch}), and the weighted
      * budget every materialization — the host's reports and both kzen workspaces alike — acquires from (bytes;
-     * default 256 MiB).
+     * default 4 GiB).
      */
     public record Host(Path dayFile, Path dataRoot, Long budgetBytes) {
-        public static final long defaultBudgetBytes = 256L << 20;
+        public static final long defaultBudgetBytes = 4L << 30;
 
         public Host {
             if (budgetBytes != null && budgetBytes <= 0) {

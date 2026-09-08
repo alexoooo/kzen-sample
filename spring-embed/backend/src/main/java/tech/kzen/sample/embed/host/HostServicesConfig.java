@@ -3,6 +3,7 @@ package tech.kzen.sample.embed.host;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tech.kzen.auto.server.context.KzenAutoHost;
+import tech.kzen.sample.embed.host.catalog.ItchCatalog;
 import tech.kzen.sample.embed.config.KzenHostProperties;
 
 import java.nio.file.Path;
@@ -25,12 +26,18 @@ public class HostServicesConfig {
     @Bean(destroyMethod = "close")
     public HostDay hostDay(KzenHostProperties properties, WeightedBudget budget) {
         KzenHostProperties.Host host = properties.host();
-        Path home = properties.home().toAbsolutePath().normalize();
-        Path dataRoot = host.dataRoot() == null ? home.resolve("data") : host.dataRoot().toAbsolutePath().normalize();
+        Path dataRoot = host.dataRoot() == null ? Path.of(System.getProperty("user.home"), "kzen-data", "itch") : host.dataRoot().toAbsolutePath().normalize();
         Path dayFile = host.dayFile() == null ? null : host.dayFile().toAbsolutePath().normalize();
         return new HostDay(dayFile, dataRoot, budget);
     }
 
+
+    @Bean(destroyMethod = "close")
+    public ItchCatalog itchCatalog(KzenHostProperties properties, WeightedBudget budget) {
+        Path root = properties.host().dataRoot() == null
+                ? Path.of(System.getProperty("user.home"), "kzen-data", "itch") : properties.host().dataRoot();
+        return new ItchCatalog(root, properties.host().dayFile(), budget);
+    }
 
     @Bean
     public TradeRepository tradeRepository(HostDay day) {
@@ -52,11 +59,12 @@ public class HostServicesConfig {
 
     /** Registered by interface; a second registration of a type, or a type kzen itself provides, fails by name. */
     @Bean
-    public KzenAutoHost kzenAutoHost(TradeRepository trades, OrderBookService books, SymbolDayLoader loader) {
+    public KzenAutoHost kzenAutoHost(TradeRepository trades, OrderBookService books, SymbolDayLoader loader, ItchCatalog catalog) {
         return KzenAutoHost.Companion.builder()
                 .service(TradeRepository.class, trades)
                 .service(OrderBookService.class, books)
                 .service(SymbolDayLoader.class, loader)
+                .service(ItchCatalog.class, catalog)
                 .build();
     }
 }

@@ -39,7 +39,7 @@ java -jar target/kzen-sample-embed-spring-0.0.1-SNAPSHOT.jar   # http://127.0.0.
 
 Any property is overridable on the command line: `--server.port=`, `--kzen.home=`, `--kzen.plugin-root=`,
 `--kzen.host.day-file=` (the ITCH day the host's services load), `--kzen.host.data-root=` (derived store; default
-`<home>/data`), `--kzen.host.budget-bytes=` (the shared arena; default 256 MiB), `--kzen.workspaces[0].port=` …
+`<user.home>/kzen-data/itch`), `--kzen.host.budget-bytes=` (the shared arena; default 4 GiB), `--kzen.workspaces[0].port=` …
 (an indexed workspace override on the command line replaces the whole yaml list — give every field). A
 workspace's notation lives in `<home>/<name>/src/main/resources/notation/main/` (what kzen's locator expects);
 drop the sample's Job templates there (`../kzen-sample-plugin/README.md`), and a `HostSymbolDaySourceWorker →
@@ -104,3 +104,12 @@ shell that holds the budget. Results are recorded in the HS25 as-built (`../kzen
   and owned by whoever pulled it (E9) — a shared one would have to be `Borrowed`.
 - **Ports are loopback and per workspace**; two workspaces on one port is a bind failure the lifecycle rolls back,
   two on one work root a named claim failure — neither is a sharing mode.
+
+## ITCH catalog source
+
+The UI workflow and real-day launch command are in [README.md](README.md). The host's `host/catalog/`
+package owns Nasdaq catalog parsing, durable download metadata and the single preparation queue shared by
+workspaces. `ItchSourceWorker` receives that `ItchCatalog` as a service and emits `DatedSymbolDay` through
+`CursorSourceWorker`. Its catalog card uses kzen-auto's reusable catalog capability and notation-selected
+display; Nasdaq-specific behavior remains in the sample. Date-selectable host reports use the same catalog.
+The default data root is `<user.home>/kzen-data/itch`, and the default arena budget is 4 GiB.

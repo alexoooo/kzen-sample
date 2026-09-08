@@ -49,15 +49,16 @@ public final class GovernedOrderBookService implements OrderBookService {
         if (levels <= 0) {
             throw new IllegalArgumentException("levels must be positive: " + levels);
         }
-        return withSymbolDay(symbol, symbolDay -> {
-            List<BookSnapshot> history = symbolDay.bookHistory();
-            BookSnapshot last = history.isEmpty() ? BookSnapshot.empty() : history.getLast();
-            return new BookTop(
-                    symbolDay.symbol(),
-                    last.bidDepth(levels).stream().map(GovernedOrderBookService::level).toList(),
-                    last.askDepth(levels).stream().map(GovernedOrderBookService::level).toList(),
-                    last.spread());
-        });
+        return withSymbolDay(symbol, symbolDay -> top(symbolDay, levels));
+    }
+
+    public static BookTop top(SymbolDay symbolDay, int levels) {
+        if (levels <= 0) throw new IllegalArgumentException("Levels must be positive");
+        List<BookSnapshot> history = symbolDay.bookHistory();
+        BookSnapshot last = history.isEmpty() ? BookSnapshot.empty() : history.getLast();
+        return new BookTop(symbolDay.symbol(),
+                last.bidDepth(levels).stream().map(GovernedOrderBookService::level).toList(),
+                last.askDepth(levels).stream().map(GovernedOrderBookService::level).toList(), last.spread());
     }
 
 

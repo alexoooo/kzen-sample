@@ -21,11 +21,11 @@ kzen:
   plugin-root:
   # The host's own market-data services (TradeRepository, OrderBookService, SymbolDayLoader), offered to every
   # workspace as @Service objects: the ITCH day they load (blank = no day loaded), the durable data area for the
-  # derived store (default <home>/data), and the one weighted budget every materialization acquires from.
+  # derived store (default <user.home>/kzen-data/itch), and the one weighted budget every materialization acquires from.
   host:
     day-file:
     data-root:
-    budget-bytes: 268435456
+    budget-bytes: 4294967296
   workspaces:
     - name: trading
       port: 18281
