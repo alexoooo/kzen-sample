@@ -74,21 +74,22 @@ class GovernedServicesTest {
         try (SymbolDayLoader.SymbolDayCursor cursor = loader.open()) {
             while (cursor.hasNext()) {
                 try (SymbolDay symbolDay = cursor.next()) {
-                    assertEquals(1, budget.stats().outstandingItems(), "one owned day at a time");
-                    assertTrue(budget.stats().currentNativeBytes() > 0, "native bytes are counted while held");
+                    assertEquals(symbolDay.weight().nativeBytes(), budget.stats().currentNativeBytes(), "one native batch at a time");
                     long[] standing = SymbolDayGraph.build(symbolDay).standingTradeEventsAndShares();
                     if (standing[0] > 0) {
                         viaHost.put(symbolDay.symbol(), List.of(standing[0], standing[1]));
                     }
                 }
-                assertEquals(0, budget.stats().outstandingItems(), "closed day, lease returned");
+                assertEquals(0, budget.stats().currentNativeBytes(), "closed day, native lease returned");
+                assertTrue(budget.stats().currentBytes() <= tech.kzen.sample.itch.store.block.PartitionBlocks.decoderScratchBytes
+                        + tech.kzen.sample.itch.day.SymbolDaySession.maximumReadAheadBytes, "only bounded read buffers remain");
             }
         }
         SortedMap<String, List<Long>> expected = new TreeMap<>();
         synthetic.expectedTrades().forEach((symbol, summary) ->
                 expected.put(symbol, List.of(summary.tradeEvents(), summary.shares())));
         assertEquals(expected, viaHost, "the host route reaches the generator's tally");
-        assertEquals(2 * loader.symbols().size(), budget.stats().acquisitions(), "one batch and one graph reservation per symbol");
+        assertTrue(budget.stats().acquisitions() >= 2 * loader.symbols().size(), "batches, graphs and loader buffers are admitted");
         assertEquals(budget.stats().acquisitions(), budget.stats().releases());
         assertEquals(0, budget.stats().currentNativeBytes());
         assertEquals(0, day.leaks());

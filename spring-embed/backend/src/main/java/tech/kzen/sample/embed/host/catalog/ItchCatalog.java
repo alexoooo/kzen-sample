@@ -89,7 +89,7 @@ public final class ItchCatalog implements AutoCloseable {
             List<CatalogEntry> rows = files.values().stream()
                     .sorted(Comparator.comparing(ItchCatalogFile::date).thenComparing(ItchCatalogFile::id))
                     .map(this::row).toList();
-            return new CatalogSnapshot(rows, catalogError);
+            return new CatalogSnapshot(rows, catalogError, data.sources().toString(), data.stores().toString());
         }
     }
 
@@ -128,7 +128,7 @@ public final class ItchCatalog implements AutoCloseable {
     private ItchStore freshStore(ItchCatalogFile file) {
         try {
             ItchStore store = stores.get(file.id());
-            if (store == null) store = ItchStore.open(data.storeFor(source(file)));
+            if (store == null || !store.isCurrent()) store = ItchStore.open(data.storeFor(source(file)));
             store.requireFresh(source(file));
             stores.put(file.id(), store);
             return store;
@@ -233,12 +233,15 @@ public final class ItchCatalog implements AutoCloseable {
         return file;
     }
 
-    public synchronized List<ItchCatalogFile> selected(List<String> ids) {
+    public record Selection(List<ItchCatalogFile> files, java.util.Map<String, ItchStore> stores) {}
+
+    public synchronized Selection selected(List<String> ids) {
         if (ids.isEmpty()) throw new IllegalArgumentException("Select at least one date");
         List<ItchCatalogFile> selected = ids.stream().distinct().map(this::requireFile)
                 .sorted(Comparator.comparing(ItchCatalogFile::date).thenComparing(ItchCatalogFile::id)).toList();
-        for (ItchCatalogFile file : selected) readyStore(file.id());
-        return selected;
+        java.util.Map<String, ItchStore> ready = new java.util.LinkedHashMap<>();
+        for (ItchCatalogFile file : selected) ready.put(file.id(), readyStore(file.id()));
+        return new Selection(selected, java.util.Map.copyOf(ready));
     }
 
     public synchronized ItchStore readyStore(String id) {
@@ -252,6 +255,10 @@ public final class ItchCatalog implements AutoCloseable {
         List<String> matches = files.values().stream().filter(f -> f.date().toString().equals(date)).map(ItchCatalogFile::id).toList();
         if (matches.size() != 1) throw new IllegalArgumentException("Select a catalog entry for date " + date + ": " + matches);
         return matches.getFirst();
+    }
+
+    public tech.kzen.sample.itch.day.SymbolDaySession openSession(ItchStore store, List<String> symbols) {
+        return new tech.kzen.sample.itch.day.SymbolDaySession(store, symbols.stream().map(store::locate).toList(), budget);
     }
 
     public DatedSymbolDay materialize(String id, String symbol) throws InterruptedException {

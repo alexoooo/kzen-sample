@@ -36,7 +36,7 @@ class ItchCatalogTest {
             catalog.prepare(List.of(second, first));
             catalog.prepare(List.of(first));
             await(catalog, first, "ready"); await(catalog, second, "ready");
-            assertEquals(first, catalog.selected(List.of(second, first)).getFirst().id());
+            assertEquals(first, catalog.selected(List.of(second, first)).files().getFirst().id());
             Path pointer = temp.resolve("stores").resolve(first + ".store/current");
             var modified = Files.getLastModifiedTime(pointer);
             catalog.prepare(List.of(first));

@@ -156,6 +156,18 @@ class CatalogSourceDisplay(props: CatalogSourceDisplayProps):
                 }
             }
             if (datesOpen) {
+                catalog?.sourceDirectory?.let { directory ->
+                    div {
+                        css { fontSize = 0.85.em; color = Color("#687080"); overflowWrap = OverflowWrap.anywhere }
+                        +"Downloaded files: $directory"
+                    }
+                }
+                catalog?.indexDirectory?.let { directory ->
+                    div {
+                        css { fontSize = 0.85.em; color = Color("#687080"); overflowWrap = OverflowWrap.anywhere; marginBottom = 8.px }
+                        +"Prepared indexes: $directory"
+                    }
+                }
                 div {
                     css { display = Display.flex; gap = 5.px; flexWrap = FlexWrap.wrap }
                     val filter = state.dateFilter.ifEmpty { if (state.selection.isEmpty()) "All" else "Selected" }

@@ -44,12 +44,19 @@ Dates and symbols are saved in the Job. They are fixed during a run; stop and st
 The default durable data area is **`<user.home>/kzen-data/itch`**, outside the project:
 
 - `sources/`: downloaded Nasdaq files.
-- `stores/`: prepared analysis stores, reused while fresh.
+- `stores/`: Zstd-compressed analysis stores, reused while fresh.
 - `catalog.properties`: saved source URLs and catalog metadata for offline use.
 
 Override it with `--kzen.host.data-root=<directory>`. The existing `12302019.NASDAQ_ITCH50.gz` download under that default directory is discovered automatically. Recognized filenames carry their trading date; catalog upload timestamps are never treated as trading dates. Public samples cover selected dates, not every trading day.
 
 The default shared analysis budget is **4 GiB** (`--kzen.host.budget-bytes=`). The launch command allows a **16 GiB heap**; these are limits, not eager allocations. Store preparation also uses bounded working buffers. A full day can take several minutes to prepare. A symbol too large for the budget fails with a capacity message.
+
+Store format v2 requires a one-time **Download and prepare** for dates prepared with v1. The existing source
+download is reused. Each run validates its selected sources once and keeps those store versions for its entire
+selection. New runs validate again. The loader decompresses blocks directly into native batch storage and
+prefetches at most 8 MiB of the next symbol's compressed file. Read buffers count toward the host budget;
+prefetch falls back to synchronous reading when memory is tight. See the sample plugin's README for the format,
+lifetime rules and standalone throughput benchmark. Generic Kzen scheduling and channels are unchanged.
 
 Each `SymbolDay` is one Arena-backed batch of packed ITCH records, including market-wide messages in feed order. `ItchMessage` getters read their `ItchRecord` on demand; loading a batch creates neither decoded field objects nor a state graph. `SymbolDayGraph.build(batch)` computes the graph separately. Batch admission accounts for its native storage; graph construction makes an additional heap reservation, held conservatively until that batch closes. If graph capacity is unavailable, construction fails immediately rather than waiting while holding native capacity. Formula/Preview over the source do not build a graph.
 
@@ -82,3 +89,30 @@ frame headers, rather than the compressed download or arena allocation size.
 **Run elapsed** measures the entire Job, including pauses, memory waits, and downstream processing.
 It survives a browser refresh and freezes as **Run duration** after completion, failure, or cancellation.
 Input reading can finish before the Job does. Starting a new run resets both counters and timing.
+
+### Prepared-store performance (2026-09-09)
+
+Measured on the development Windows machine with JDK 25.0.4.1, an isolated packaged host, a 4 GiB analysis
+budget and a 4 GiB JVM heap. The Job was ITCH → Preview (sample 1,000), all 8,906 symbols for 2019-12-30.
+Downloads and preparation are excluded from Job timing. No OS cache flush was performed.
+
+| Measurement | Result |
+|---|---:|
+| Uncompressed v1 partition files | 10,401,366,149 bytes |
+| Zstd v2 partition files | 3,773,697,470 bytes (63.7% smaller) |
+| Final v2 preparation, from the existing gzip download | 636.1 s |
+| Existing packaged Job, isolated control run | 54.2 s |
+| Updated Job, first run in its JVM | 20.9 s |
+| Updated Job, three subsequent runs | 20.3 / 21.8 / 22.0 s |
+| Peak admitted batch and loader-buffer memory | 119,455,744 bytes (113.9 MiB) |
+| Memory waits / leaked batches / remaining leases | 0 / 0 / 0 |
+
+Each updated run reported Success, 268,833,830 messages and 10,403,957,504 logical analysis bytes, including
+market-wide records replayed into each symbol. The isolated control did not reproduce the reported
+5.5-minute interactive run, so that figure is not used as a measured speedup baseline.
+
+The standalone core loader took 47.4 s before the change; v2 materialize-and-close passes took
+22.2 / 21.2 / 19.5 / 19.3 s. Pull-thread heap allocation fell from 30.3 GiB to roughly 92–95 MiB per pass;
+this excludes background prefetch allocation, whose live buffer is capped at 8 MiB. The removed per-symbol
+fingerprint loop independently took 35.9 s and allocated 17.4 GiB on the source implementation. These
+component measurements are not additive estimates of the packaged Job's elapsed time.

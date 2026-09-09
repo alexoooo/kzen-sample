@@ -89,6 +89,28 @@ class ItchSourceCursorTest {
         }
     }
 
+    @Test void runningSelectionUsesItsValidatedStoreAndANewRunRejectsChangedSource() throws Exception {
+        Path source = Files.createDirectories(temp.resolve("sources")).resolve(first);
+        SyntheticItchDay.generate(31, 20).writeTo(source, true);
+        WeightedBudget budget = new WeightedBudget(4L << 20);
+        try (var catalog = new ItchCatalog(temp, null, budget, URI.create("http://127.0.0.1:1/"))) {
+            catalog.prepare(List.of(first));
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            while (!catalog.catalog(false).getEntries().getFirst().getState().equals("ready")) {
+                assertTrue(System.nanoTime() < deadline);
+                Thread.sleep(10);
+            }
+            try (var cursor = new ItchSourceCursor(catalog, List.of(first), List.of())) {
+                Files.write(source, new byte[]{0}, java.nio.file.StandardOpenOption.APPEND);
+                int symbols = 0;
+                while (cursor.hasNext()) try (var day = cursor.next()) { symbols++; }
+                assertEquals(4, symbols);
+            }
+            assertThrows(IllegalStateException.class, () -> new ItchSourceCursor(catalog, List.of(first), List.of()));
+            assertEquals(0, budget.stats().currentBytes());
+        }
+    }
+
     private static long number(ItchSourceCursor cursor, String key) {
         return Long.parseLong(((Map<?, ?>)cursor.progress().get("itch")).get(key).toString());
     }

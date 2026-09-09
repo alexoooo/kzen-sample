@@ -79,7 +79,7 @@ class HostGovernedIT {
         dayFile = temp.resolve("synthetic-day.itch");
         synthetic = SyntheticItchDay.generate(seed, 20);
         synthetic.writeTo(dayFile, false);
-        oneDayBudget = largestSymbolDayWeight() * 3 / 2;
+        oneDayBudget = tech.kzen.sample.itch.store.block.PartitionBlocks.decoderScratchBytes + largestSymbolDayWeight() * 3 / 2;
         hostRouteCsv = temp.resolve("host-route.csv");
         rawRouteCsv = temp.resolve("raw-route.csv");
 
@@ -304,7 +304,8 @@ class HostGovernedIT {
         try {
             awaitLog(log, "Tomcat started on port " + port, Duration.ofSeconds(90));
             String base = "http://127.0.0.1:" + port;
-            long held = hold(base, oneDayBudget - largestBatchWeight * 3 / 2);
+            long held = hold(base, oneDayBudget - tech.kzen.sample.itch.store.block.PartitionBlocks.decoderScratchBytes
+                    - largestBatchWeight * 3 / 2);
 
             HttpResponse<String> started = http.send(HttpRequest.newBuilder(URI.create(
                     base + "/kzen/trading/logic/startRun?path=main%2FSortDays.yaml&object=main")).build(),
