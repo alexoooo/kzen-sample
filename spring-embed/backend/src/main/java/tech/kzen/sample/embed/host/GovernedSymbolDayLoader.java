@@ -36,7 +36,7 @@ public final class GovernedSymbolDayLoader implements SymbolDayLoader {
 
     @Override
     public SymbolDayCursor open() {
-        SymbolDays days = new SymbolDays(day.store(), day.budget(), day.coefficients());
+        SymbolDays days = new SymbolDays(day.store(), day.budget());
         Iterator<SymbolDay> iterator = days.iterator();
         return new SymbolDayCursor() {
             @Override

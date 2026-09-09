@@ -1,5 +1,7 @@
 package tech.kzen.sample.embed.host;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,7 +76,7 @@ class GovernedServicesTest {
                 try (SymbolDay symbolDay = cursor.next()) {
                     assertEquals(1, budget.stats().outstandingItems(), "one owned day at a time");
                     assertTrue(budget.stats().currentNativeBytes() > 0, "native bytes are counted while held");
-                    long[] standing = symbolDay.graph().standingTradeEventsAndShares();
+                    long[] standing = SymbolDayGraph.build(symbolDay).standingTradeEventsAndShares();
                     if (standing[0] > 0) {
                         viaHost.put(symbolDay.symbol(), List.of(standing[0], standing[1]));
                     }
@@ -86,7 +88,7 @@ class GovernedServicesTest {
         synthetic.expectedTrades().forEach((symbol, summary) ->
                 expected.put(symbol, List.of(summary.tradeEvents(), summary.shares())));
         assertEquals(expected, viaHost, "the host route reaches the generator's tally");
-        assertEquals(loader.symbols().size(), budget.stats().acquisitions());
+        assertEquals(2 * loader.symbols().size(), budget.stats().acquisitions(), "one batch and one graph reservation per symbol");
         assertEquals(budget.stats().acquisitions(), budget.stats().releases());
         assertEquals(0, budget.stats().currentNativeBytes());
         assertEquals(0, day.leaks());
@@ -106,7 +108,7 @@ class GovernedServicesTest {
                 }));
         assertEquals("processing failed on purpose", failure.getMessage());
         assertEquals(0, budget.stats().outstandingItems(), "the day closed in the finally");
-        assertEquals(2, budget.stats().releases());
+        assertEquals(budget.stats().acquisitions(), budget.stats().releases());
         assertEquals(0, day.leaks());
     }
 

@@ -1,7 +1,7 @@
 package tech.kzen.sample.embed.host.catalog;
 
-import tech.kzen.auto.common.data.catalog.CatalogEntry;
-import tech.kzen.auto.common.data.catalog.CatalogSnapshot;
+import tech.kzen.sample.embed.catalog.CatalogEntry;
+import tech.kzen.sample.embed.catalog.CatalogSnapshot;
 import tech.kzen.sample.embed.host.WeightedBudget;
 import tech.kzen.sample.itch.day.DatedSymbolDay;
 import tech.kzen.sample.itch.day.MaterializationWeight;
@@ -255,10 +255,15 @@ public final class ItchCatalog implements AutoCloseable {
     }
 
     public DatedSymbolDay materialize(String id, String symbol) throws InterruptedException {
+        return materialize(id, symbol, tech.kzen.sample.itch.day.MaterializationProgress.none);
+    }
+
+    public DatedSymbolDay materialize(String id, String symbol,
+            tech.kzen.sample.itch.day.MaterializationProgress progress) throws InterruptedException {
         ItchCatalogFile file;
         ItchStore store;
         synchronized (this) { file = requireFile(id); store = readyStore(id); }
-        SymbolDay day = SymbolDay.materialize(store, store.locate(symbol), budget, MaterializationWeight.Coefficients.measured);
+        SymbolDay day = SymbolDay.materialize(store, store.locate(symbol), budget, progress);
         return new DatedSymbolDay(file.date().toString(), symbol, file.url().toString(), day);
     }
 

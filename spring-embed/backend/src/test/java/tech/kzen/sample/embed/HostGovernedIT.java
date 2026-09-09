@@ -65,6 +65,7 @@ class HostGovernedIT {
     private static Path hostRouteCsv;
     private static Path rawRouteCsv;
     private static long oneDayBudget;
+    private static long largestBatchWeight;
 
 
     @BeforeAll
@@ -142,7 +143,7 @@ class HostGovernedIT {
         HttpResponse<String> book = get("/host/book/" + SyntheticItchDay.aapl + "?levels=2");
         assertEquals(200, book.statusCode(), book.body());
         assertTrue(book.body().contains("\"symbol\":\"" + SyntheticItchDay.aapl + "\""), book.body());
-        assertEquals(1, stat("acquisitions"), "the book query materialized one symbol-day");
+        assertEquals(2, stat("acquisitions"), "the book query reserves one batch and one graph");
         assertEquals(0, stat("outstandingItems"));
         assertEquals(0, stat("leaks"));
     }
@@ -303,6 +304,7 @@ class HostGovernedIT {
         try {
             awaitLog(log, "Tomcat started on port " + port, Duration.ofSeconds(90));
             String base = "http://127.0.0.1:" + port;
+            long held = hold(base, oneDayBudget - largestBatchWeight * 3 / 2);
 
             HttpResponse<String> started = http.send(HttpRequest.newBuilder(URI.create(
                     base + "/kzen/trading/logic/startRun?path=main%2FSortDays.yaml&object=main")).build(),
@@ -323,6 +325,7 @@ class HostGovernedIT {
                     base + "/kzen/trading/logic/cancel?run=" + runId)).build(), HttpResponse.BodyHandlers.ofString());
             assertEquals(200, cancelled.statusCode(), cancelled.body());
             awaitIdle(base, Duration.ofSeconds(60));
+            release(base, held);
             awaitStat(base, "outstandingItems", 0, Duration.ofSeconds(30));
             assertEquals(stat(base, "acquisitions"), stat(base, "releases"), "cancel returned every retained lease");
             assertEquals(0, stat(base, "waiting"));
@@ -376,7 +379,10 @@ class HostGovernedIT {
             long largest = 0;
             for (String symbol : probe.symbols()) {
                 try (SymbolDay day = probe.materialize(symbol)) {
-                    largest = Math.max(largest, day.weight().total());
+                    largestBatchWeight = Math.max(largestBatchWeight, day.weight().total());
+                    largest = Math.max(largest, day.weight().total() +
+                            tech.kzen.sample.itch.day.MaterializationWeight.graph(day.partitionStats(),
+                                    tech.kzen.sample.itch.day.MaterializationWeight.Coefficients.measured).total());
                 }
             }
             assertTrue(largest > 0);
@@ -440,6 +446,7 @@ class HostGovernedIT {
                 "--server.port=" + port,
                 "--kzen.home=" + home,
                 "--kzen.host.day-file=" + dayFile,
+                "--kzen.host.data-root=" + home.resolve("data"),
                 "--kzen.host.budget-bytes=" + budget,
                 "--kzen.workspaces[0].name=trading", "--kzen.workspaces[0].port=" + trading,
                 "--kzen.workspaces[1].name=risk", "--kzen.workspaces[1].port=" + risk));
@@ -519,7 +526,11 @@ class HostGovernedIT {
 
 
     private static long hold(long bytes) throws Exception {
-        HttpResponse<String> held = http.send(HttpRequest.newBuilder(uri("/kzen-host/budget/hold?bytes=" + bytes))
+        return hold("http://127.0.0.1:" + hostPort, bytes);
+    }
+
+    private static long hold(String base, long bytes) throws Exception {
+        HttpResponse<String> held = http.send(HttpRequest.newBuilder(URI.create(base + "/kzen-host/budget/hold?bytes=" + bytes))
                 .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(200, held.statusCode(), held.body());
         Matcher matcher = Pattern.compile("\"hold\":(\\d+)").matcher(held.body());
@@ -529,7 +540,11 @@ class HostGovernedIT {
 
 
     private static void release(long hold) throws Exception {
-        HttpResponse<String> released = http.send(HttpRequest.newBuilder(uri("/kzen-host/budget/hold/" + hold)).DELETE().build(),
+        release("http://127.0.0.1:" + hostPort, hold);
+    }
+
+    private static void release(String base, long hold) throws Exception {
+        HttpResponse<String> released = http.send(HttpRequest.newBuilder(URI.create(base + "/kzen-host/budget/hold/" + hold)).DELETE().build(),
                 HttpResponse.BodyHandlers.ofString());
         assertEquals(200, released.statusCode(), released.body());
     }

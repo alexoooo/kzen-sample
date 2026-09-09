@@ -1,0 +1,2 @@
+CatalogActions:
+  class: tech.kzen.sample.embed.glue.catalog.CatalogActions

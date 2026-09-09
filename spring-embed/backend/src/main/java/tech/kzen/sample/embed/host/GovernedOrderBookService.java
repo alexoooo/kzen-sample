@@ -1,5 +1,7 @@
 package tech.kzen.sample.embed.host;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.sample.itch.day.SymbolDay;
 import tech.kzen.sample.itch.model.BookLevel;
 import tech.kzen.sample.itch.model.BookSnapshot;
@@ -54,7 +56,7 @@ public final class GovernedOrderBookService implements OrderBookService {
 
     public static BookTop top(SymbolDay symbolDay, int levels) {
         if (levels <= 0) throw new IllegalArgumentException("Levels must be positive");
-        List<BookSnapshot> history = symbolDay.bookHistory();
+        List<BookSnapshot> history = SymbolDayGraph.build(symbolDay).bookHistory();
         BookSnapshot last = history.isEmpty() ? BookSnapshot.empty() : history.getLast();
         return new BookTop(symbolDay.symbol(),
                 last.bidDepth(levels).stream().map(GovernedOrderBookService::level).toList(),

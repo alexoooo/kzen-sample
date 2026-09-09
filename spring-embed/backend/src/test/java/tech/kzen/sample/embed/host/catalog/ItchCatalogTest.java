@@ -3,7 +3,7 @@ package tech.kzen.sample.embed.host.catalog;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import tech.kzen.auto.common.data.catalog.CatalogEntry;
+import tech.kzen.sample.embed.catalog.CatalogEntry;
 import tech.kzen.sample.embed.host.WeightedBudget;
 import tech.kzen.sample.itch.synth.SyntheticItchDay;
 import java.net.InetSocketAddress;

@@ -167,9 +167,9 @@ class HostPackagedIT {
 
             HttpResponse<String> ui = get("/kzen/" + workspace + "/index.html");
             assertEquals(200, ui.statusCode());
-            assertTrue(ui.body().contains("kzen-auto-js.js"), ui.body().substring(0, Math.min(300, ui.body().length())));
+            assertTrue(ui.body().contains("kzen-sample-embed-ui.js"), ui.body().substring(0, Math.min(300, ui.body().length())));
 
-            HttpResponse<byte[]> bundle = http.send(HttpRequest.newBuilder(uri("/kzen/" + workspace + "/static/kzen-auto-js.js"))
+            HttpResponse<byte[]> bundle = http.send(HttpRequest.newBuilder(uri("/kzen/" + workspace + "/static/kzen-sample-embed-ui.js"))
                     .header("Accept-Encoding", "gzip").build(), HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(200, bundle.statusCode());
             assertEquals("gzip", bundle.headers().firstValue("content-encoding").orElse(""), "gzip relayed, not re-encoded");
@@ -234,7 +234,7 @@ class HostPackagedIT {
     @Test
     @Order(3)
     void catalogPreparesAndRunsDatedTypedAnalysisThroughTheProxy() throws Exception {
-        String action = "/kzen/risk/action/detached?path=auto-jvm%2Fdatasource%2Fcatalog-source.yaml"
+        String action = "/kzen/risk/action/detached?path=auto-jvm%2Fkzen-sample-embed%2Fcatalog-source.yaml"
                 + "&object=CatalogActions&source=main%2FCatalog.yaml%23main.workers%2FItch";
         HttpResponse<String> listed = get(action + "&action=list");
         assertEquals(200, listed.statusCode(), listed.body());
@@ -290,6 +290,9 @@ class HostPackagedIT {
                 + "&object=LogicTraceEndpoint&action=lookup-run&query=%2F&run="
                 + java.net.URLEncoder.encode(previewRun.body().trim().replace("\"", ""), StandardCharsets.UTF_8)).body();
         assertTrue(trace.contains("previewItems"), trace);
+        assertTrue(trace.contains("$run-timing") && trace.contains("elapsedMillis"), trace);
+        assertTrue(trace.contains("totalSymbols") && trace.contains("totalMessages") && trace.contains("totalBytes"), trace);
+        assertTrue(trace.contains("complete"), trace);
         List<PreviewNode> previewItems = new ArrayList<>();
         collectPreviewItems(Json.Default.parseToJsonElement(trace), previewItems);
         assertEquals(2, previewItems.size(), trace);

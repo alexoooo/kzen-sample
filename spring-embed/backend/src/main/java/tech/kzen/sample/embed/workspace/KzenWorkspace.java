@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 public final class KzenWorkspace {
     private static final Logger logger = LoggerFactory.getLogger(KzenWorkspace.class);
     private static final String host = "127.0.0.1";
-    private static final String jsModuleName = "kzen-auto-js";
+    private static final String jsModuleName = "kzen-sample-embed-ui";
     private static final long stopGraceMillis = 1_000;
     private static final long stopTimeoutMillis = 5_000;
 

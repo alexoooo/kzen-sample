@@ -1,6 +1,15 @@
 # Embedded Kzen with ITCH market data
 
-Build with Java 25 and Maven after publishing kzen-auto and installing kzen-sample-plugin locally (see [AGENTS.md](AGENTS.md)). Launch from this directory:
+Build with Java 25 after publishing kzen-auto and installing kzen-sample-plugin locally (see [AGENTS.md](AGENTS.md)). The sample owns its catalog UI and composes it with Kzen's published client:
+
+```powershell
+cd frontend
+./gradlew publishToMavenLocal
+cd ..
+mvn -o -B verify
+```
+
+The frontend JVM artifact carries the shared catalog models and the browser bundle. Launch from this directory:
 
 ```powershell
 & "$env:JAVA_HOME/bin/java" -Xmx16g -XX:+UseG1GC -jar target/kzen-sample-embed-spring-0.0.1-SNAPSHOT.jar
@@ -42,6 +51,10 @@ Override it with `--kzen.host.data-root=<directory>`. The existing `12302019.NAS
 
 The default shared analysis budget is **4 GiB** (`--kzen.host.budget-bytes=`). The launch command allows a **16 GiB heap**; these are limits, not eager allocations. Store preparation also uses bounded working buffers. A full day can take several minutes to prepare. A symbol too large for the budget fails with a capacity message.
 
+Each `SymbolDay` is one Arena-backed batch of packed ITCH records, including market-wide messages in feed order. `ItchMessage` getters read their `ItchRecord` on demand; loading a batch creates neither decoded field objects nor a state graph. `SymbolDayGraph.build(batch)` computes the graph separately. Batch admission accounts for its native storage; graph construction makes an additional heap reservation, held conservatively until that batch closes. If graph capacity is unavailable, construction fails immediately rather than waiting while holding native capacity. Formula/Preview over the source do not build a graph.
+
+The catalog models, actions, notation, and date/symbol display belong to this sample. The stock Kzen artifacts contain none of them. The frontend registers its own display before invoking Kzen's client entry point; workspaces serve the sample bundle through the existing configurable module name.
+
 A mismatched existing file is left intact and reported for operator inspection. Failed downloads never replace it. Partial transfers created by the downloader are removed on failure/cancellation; retries restart the transfer. A host stopped abruptly can leave `.part` files, which are ignored by the catalog.
 
 ## Host reports
@@ -57,3 +70,15 @@ Prepare the date in the UI first. Existing report URLs without a date and `--kze
 ## Verification
 
 `mvn -o -B verify` covers catalog parsing, local fixtures served over HTTP, cancellation, checksums, store reuse, budget ownership, and packaged multi-date execution through the Spring proxy. Tests use isolated data directories and synthetic days; they do not download real market files.
+
+### Analysis run progress
+
+The ITCH card shows the current file and symbol, with read/total and remaining counts for symbols,
+messages, and analysis bytes. The progress bar follows bytes; expand **Progress by file** for the
+per-file breakdown. A symbol is one selected date/symbol batch. Message and byte totals include
+market-wide records replayed into each batch. Analysis bytes measure prepared-store frames, including
+frame headers, rather than the compressed download or arena allocation size.
+
+**Run elapsed** measures the entire Job, including pauses, memory waits, and downstream processing.
+It survives a browser refresh and freezes as **Run duration** after completion, failure, or cancellation.
+Input reading can finish before the Job does. Starting a new run resets both counters and timing.

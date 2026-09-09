@@ -28,7 +28,6 @@ public final class HostDay {
     private final Path dayFile;
     private final ItchDataArea dataArea;
     private final WeightedBudget budget;
-    private final MaterializationWeight.Coefficients coefficients = MaterializationWeight.Coefficients.measured;
     private final AtomicLong leaks = new AtomicLong();
     private final SymbolDayLeakDetector.Listener leakListener = diagnostic -> {
         leaks.incrementAndGet();
@@ -57,10 +56,6 @@ public final class HostDay {
 
     public WeightedBudget budget() {
         return budget;
-    }
-
-    public MaterializationWeight.Coefficients coefficients() {
-        return coefficients;
     }
 
     public long leaks() {
@@ -95,7 +90,7 @@ public final class HostDay {
     /** One fresh symbol-day under the budget; the caller closes it. */
     public SymbolDay materialize(String symbol) throws InterruptedException {
         ItchStore open = store();
-        return SymbolDay.materialize(open, open.locate(symbol), budget, coefficients);
+        return SymbolDay.materialize(open, open.locate(symbol), budget);
     }
 
 

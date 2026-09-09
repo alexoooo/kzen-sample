@@ -7,12 +7,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 
 /**
- * The host-wide arena as a weighted semaphore over the core's admission seam: a symbol-day acquires its
- * persisted weight (native bytes plus the estimated heap graph) before allocating anything, blocks while the
- * capacity is spoken for, and returns it exactly once when the day closes. A weight the capacity can never
- * admit fails before waiting; an interrupted wait acquires nothing. Every host report and every kzen workspace
- * that materializes through the host's services draws on this one budget. The counters are the record a test
- * or an operator reads; none of them retains a model.
+ * Host-wide admission for native batches and derived heap data. Initial batch acquisition can wait;
+ * derived admission is nonblocking because its caller already holds a batch. Counters count reservations.
  */
 public final class WeightedBudget implements MaterializationBudget {
     private final long capacityBytes;
@@ -90,6 +86,22 @@ public final class WeightedBudget implements MaterializationBudget {
         return new HeldLease(weight);
     }
 
+
+    @Override
+    public Lease tryAcquire(MaterializationWeight weight) {
+        long total = weight.total();
+        if (weight.nativeBytes() < 0 || weight.estimatedHeapBytes() < 0 || total < 0)
+            throw new IllegalArgumentException("Weight must not be negative: " + weight);
+        synchronized (lock) {
+            if (total > capacityBytes - currentBytes) return null;
+            currentBytes += total;
+            currentNativeBytes += weight.nativeBytes();
+            peakBytes = Math.max(peakBytes, currentBytes);
+            outstanding++;
+            acquisitions.incrementAndGet();
+            return new HeldLease(weight);
+        }
+    }
 
     public BudgetStats stats() {
         synchronized (lock) {

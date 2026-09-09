@@ -1,5 +1,7 @@
 package tech.kzen.sample.embed.web;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,7 +26,7 @@ public class DatedHostReportController {
             var rows = new ArrayList<Map<String, Object>>();
             for (String symbol : symbols) {
                 try (var day = catalog.materialize(id, symbol)) {
-                    long[] tally = day.day().graph().standingTradeEventsAndShares();
+                    long[] tally = SymbolDayGraph.build(day.day()).standingTradeEventsAndShares();
                     rows.add(Map.of("date", date, "symbol", symbol, "tradeEvents", tally[0], "shares", tally[1]));
                 }
             }

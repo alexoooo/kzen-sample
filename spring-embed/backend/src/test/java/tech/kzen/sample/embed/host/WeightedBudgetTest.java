@@ -22,6 +22,22 @@ class WeightedBudgetTest {
 
 
     @Test
+    void derivedAdmissionDoesNotWaitWhileTheBatchHoldsCapacity() throws Exception {
+        WeightedBudget budget = new WeightedBudget(1000);
+        try (var batch = budget.acquire(weight(800, 0))) {
+            assertEquals(null, budget.tryAcquire(weight(0, 201)));
+            assertEquals(0, budget.stats().waits());
+            try (var graph = budget.tryAcquire(weight(0, 200))) {
+                assertEquals(1000, budget.stats().currentBytes());
+                assertEquals(800, budget.stats().currentNativeBytes());
+            }
+            assertEquals(800, budget.stats().currentBytes());
+        }
+        assertEquals(0, budget.stats().currentBytes());
+        assertEquals(budget.stats().acquisitions(), budget.stats().releases());
+    }
+
+    @Test
     void admitsUpToCapacityCountsAndReleasesExactlyOnce() throws Exception {
         WeightedBudget budget = new WeightedBudget(1000);
         MaterializationBudget.Lease a = budget.acquire(weight(300, 300));

@@ -11,6 +11,7 @@ owns the runtime, the workspaces, the logging backend and the reverse proxy. Rea
 
 | Path | What |
 |---|---|
+| `frontend/` | standalone Gradle KMP build for sample catalog DTOs and client display; publishes `kzen-sample-embed-ui-jvm` with the browser bundle. Kotlin/KSP/wrappers pins track kzen-auto; it is not included in the umbrella composite |
 | `pom.xml` | `spring-boot-starter-parent` 4.1.1 as the **parent** (a BOM import ignores the Kotlin / coroutines / serialization / Selenium overrides), plain jars (`copy-dependencies` → `target/lib/`, manifest `Class-Path`), no `spring-boot-maven-plugin`, the convergence pins HS02 found |
 | `src/main/java/tech/kzen/sample/embed/EmbedApplication.java` | `@SpringBootApplication` entry point |
 | `config/KzenHostProperties.java` | `kzen.home`, `kzen.plugin-root`, `kzen.workspaces[]{name, port, work-root}` |
@@ -33,7 +34,8 @@ host depends on must be in Maven Local first — from their own directories:
 cd ../kzen-lib && ./gradlew publishToMavenLocal
 cd ../kzen-auto && ./gradlew publishToMavenLocal          # all of kzen-auto, not a subset
 cd ../kzen-sample-plugin && mvn -o -B install              # the plugin's core + adapter (plugin zero here)
-cd ../kzen-sample-embed-spring && mvn -o -B verify         # package + the integration tests
+cd ../kzen-sample-embed-spring/frontend && ./gradlew publishToMavenLocal
+cd .. && mvn -o -B verify         # package + the integration tests
 java -jar target/kzen-sample-embed-spring-0.0.1-SNAPSHOT.jar   # http://127.0.0.1:18280/
 ```
 
@@ -110,6 +112,7 @@ shell that holds the budget. Results are recorded in the HS25 as-built (`../kzen
 The UI workflow and real-day launch command are in [README.md](README.md). The host's `host/catalog/`
 package owns Nasdaq catalog parsing, durable download metadata and the single preparation queue shared by
 workspaces. `ItchSourceWorker` receives that `ItchCatalog` as a service and emits `DatedSymbolDay` through
-`CursorSourceWorker`. Its catalog card uses kzen-auto's reusable catalog capability and notation-selected
-display; Nasdaq-specific behavior remains in the sample. Date-selectable host reports use the same catalog.
+`CursorSourceWorker`. Its catalog models, actions, and notation-selected display live in this sample. The `frontend/` Gradle build
+composes the display with the published Kzen client and publishes the models plus bundle as `kzen-sample-embed-ui-jvm`;
+rebuild it before Maven verification after frontend edits. Kzen core contains no catalog feature. Date-selectable host reports use the same catalog.
 The default data root is `<user.home>/kzen-data/itch`, and the default arena budget is 4 GiB.

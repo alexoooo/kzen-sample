@@ -105,6 +105,12 @@
             <version>${ktor.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>tech.kzen.sample.embed</groupId>
+            <artifactId>kzen-sample-embed-ui-jvm</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
         <!-- The sample plugin as ordinary dependencies: plugin zero, the embedded-host way in. -->
         <dependency>
             <groupId>tech.kzen.sample.plugin</groupId>
