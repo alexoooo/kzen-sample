@@ -141,3 +141,13 @@ its own child JVM, expecting both readers, both bundled documents, the seven `@R
 identity for the core's `SymbolDays` and `ItchReader`. The host jars come from `-Dkzen.auto.libs=<kzen-auto-jvm
 build/libs>` (default: the umbrella sibling's, after `./gradlew :kzen-auto-jvm:jar :kzen-auto-jvm:copyDependencies`);
 the test skips itself when that directory is absent.
+
+## Packed symbol-day batches
+
+`SymbolDay.materialize(store, locate[, budget])` loads the complete batch into one shared Arena, merging market-wide records by ordinal. `batch.record(index)` is a binary handle into that memory; `batch.message(index)` wraps it with the appropriate `ItchMessage` type. Primitive getters read the encoded bytes and text getters allocate only when called. Closing the batch invalidates its record/message views; those views have no independent ownership.
+
+`SymbolDayGraph.build(batch)` constructs the state graph separately. It reserves estimated graph heap through the batch's budget without waiting, and that reservation lasts until batch close. A budget implementation supporting derived analyses implements `tryAcquire`; unavailable capacity rejects graph construction while leaving the raw batch usable. The default budget is unlimited. The batch has no graph cache, so callers needing several graph queries should build once and reuse that graph.
+
+The existing message constructors create packed heap records for authored messages and fixtures. Stream readers copy their reusable input buffers for detached messages; the batch loader copies raw store frames directly into its Arena. Field values and wire format remain unchanged.
+
+`ItchDayBenchmark` reports batch allocation/retained memory separately from graph construction. ITCH-specific integration and tests stay in the sample repositories; Kzen supplies general value, ownership, expression, preview, and display-extension APIs.

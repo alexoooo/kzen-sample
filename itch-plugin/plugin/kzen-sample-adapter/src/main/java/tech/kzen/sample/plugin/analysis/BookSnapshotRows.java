@@ -1,5 +1,7 @@
 package tech.kzen.sample.plugin.analysis;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.lib.common.exec.data.type.DataContract;
 import tech.kzen.lib.common.exec.data.value.DataValue;
 import tech.kzen.sample.itch.analysis.BookHistorySampler;
@@ -57,7 +59,7 @@ public final class BookSnapshotRows {
 
 
     public static List<DataValue> rows(SymbolDay day, long intervalNanos, int levels) {
-        List<BookHistorySampler.Sample> samples = BookHistorySampler.sample(day.bookHistory(), intervalNanos);
+        List<BookHistorySampler.Sample> samples = BookHistorySampler.sample(SymbolDayGraph.build(day).bookHistory(), intervalNanos);
         List<DataValue> rows = new ArrayList<>(samples.size());
         for (BookHistorySampler.Sample sample : samples) {
             rows.add(row(day.symbol(), sample, levels));

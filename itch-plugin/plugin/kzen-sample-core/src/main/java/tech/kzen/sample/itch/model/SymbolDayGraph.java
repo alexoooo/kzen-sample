@@ -1,5 +1,8 @@
 package tech.kzen.sample.itch.model;
 
+import tech.kzen.sample.itch.day.SymbolDay;
+import tech.kzen.sample.itch.day.MaterializationWeight;
+
 import tech.kzen.sample.itch.message.ItchMessage;
 import tech.kzen.sample.itch.message.Side;
 
@@ -23,6 +26,17 @@ import java.util.Set;
  * lifecycles, live or ended, are retained in {@link #orders} in add order.
  */
 public final class SymbolDayGraph {
+    public static SymbolDayGraph build(SymbolDay batch) {
+        batch.reserveHeap(MaterializationWeight.graph(batch.partitionStats(),
+                MaterializationWeight.Coefficients.measured).estimatedHeapBytes());
+        Builder builder = builder();
+        for (int i = 0; i < batch.messageCount(); i++) {
+            if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("Graph construction interrupted");
+            builder.observe(batch.message(i));
+        }
+        return builder.build();
+    }
+
     private final List<BookSnapshot> bookHistory;
     private final List<OrderLifecycle> orders;
     private final Map<Long, Integer> orderIndexByReference;

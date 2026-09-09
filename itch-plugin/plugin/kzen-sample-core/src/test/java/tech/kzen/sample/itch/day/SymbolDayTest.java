@@ -68,9 +68,51 @@ class SymbolDayTest {
 
     //-----------------------------------------------------------------------------------------------------------------
     @Test
+    void loadingProgressIncludesSharedFramesAndUpdatesInsideLargeBatches() throws Exception {
+        ItchStore large = store(SyntheticItchDay.generate(seed, 10_000), "progress");
+        List<long[]> updates = new ArrayList<>();
+        try (SymbolDay batch = SymbolDay.materialize(large, SyntheticItchDay.aaplLocate,
+                MaterializationBudget.unlimited(), (messages, bytes) -> updates.add(new long[]{messages, bytes}))) {
+            assertTrue(updates.size() > 2);
+            assertEquals(0, updates.getFirst()[0]);
+            assertEquals(batch.messageCount(), updates.getLast()[0]);
+            assertEquals(large.stats(SyntheticItchDay.aaplLocate).bytes() + large.stats(0).bytes(), updates.getLast()[1]);
+            for (int i = 1; i < updates.size(); i++) {
+                assertTrue(updates.get(i)[0] >= updates.get(i - 1)[0]);
+                assertTrue(updates.get(i)[1] >= updates.get(i - 1)[1]);
+            }
+        }
+    }
+
+    @Test
+    void progressFailureReleasesAdmission() {
+        RecordingBudget budget = new RecordingBudget(Long.MAX_VALUE);
+        assertThrows(IllegalStateException.class, () -> SymbolDay.materialize(scripted,
+                SyntheticItchDay.aaplLocate, budget, (messages, bytes) -> { throw new IllegalStateException("observer failed"); }));
+        assertEquals(1, budget.acquired.get());
+        assertEquals(1, budget.released.get());
+    }
+
+    @Test
+    void batchLoadsWithoutGraphAdmissionAndAllRecordViewsShareItsLifetime() throws Exception {
+        RecordingBudget budget = new RecordingBudget(Long.MAX_VALUE);
+        ItchMessage retained;
+        try (SymbolDay batch = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate, budget)) {
+            assertEquals(1, budget.acquired.get());
+            assertEquals(0, batch.weight().estimatedHeapBytes());
+            retained = batch.message(0);
+            assertEquals('S', retained.type());
+            assertThrows(IllegalStateException.class, () -> SymbolDayGraph.build(batch));
+            assertEquals('S', retained.type(), "rejected graph construction leaves the batch readable");
+        }
+        assertThrows(IllegalStateException.class, retained::type);
+        assertEquals(1, budget.released.get());
+    }
+
+    @Test
     void bookStatesAndOrderLifecyclesMatchTheHandAuthoredScenario() {
         try (SymbolDay aapl = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate)) {
-            SymbolDayGraph graph = aapl.graph();
+            SymbolDayGraph graph = SymbolDayGraph.build(aapl);
             List<BookSnapshot> history = graph.bookHistory();
             assertEquals(1 + 8, history.size(), "empty book plus one state per book-affecting AAPL message");
 
@@ -108,7 +150,7 @@ class SymbolDayTest {
         }
 
         try (SymbolDay msft = SymbolDay.materialize(scripted, SyntheticItchDay.msftLocate)) {
-            SymbolDayGraph graph = msft.graph();
+            SymbolDayGraph graph = SymbolDayGraph.build(msft);
             OrderLifecycle attributed = graph.orders().getFirst();
             assertEquals("NSDQ", attributed.attribution());
             assertEquals(OrderLifecycle.State.DELETED, attributed.state());
@@ -123,7 +165,7 @@ class SymbolDayTest {
         }
 
         try (SymbolDay goog = SymbolDay.materialize(scripted, SyntheticItchDay.googLocate)) {
-            SymbolDayGraph graph = goog.graph();
+            SymbolDayGraph graph = SymbolDayGraph.build(goog);
             TradeEvent nonDisplayed = graph.trades().getFirst();
             assertEquals(TradeEvent.Kind.NON_DISPLAYED, nonDisplayed.kind());
             assertEquals(new BookLevel(2800 * price4, 10, 1), graph.bookBefore(nonDisplayed.ordinal()).bestBid());
@@ -140,7 +182,7 @@ class SymbolDayTest {
         ItchStore store = store(day, "seeded");
         for (Map.Entry<String, SymbolTradeSummary> expected : day.expectedTrades().entrySet()) {
             try (SymbolDay symbolDay = SymbolDay.materialize(store, store.locate(expected.getKey()))) {
-                SymbolDayGraph graph = symbolDay.graph();
+                SymbolDayGraph graph = SymbolDayGraph.build(symbolDay);
                 BookSnapshot early = graph.bookHistory().get(3);
                 List<BookLevel> earlyBids = early.bidDepth(5);
                 List<BookLevel> earlyAsks = early.askDepth(5);
@@ -165,7 +207,7 @@ class SymbolDayTest {
         ExecutorService other = Executors.newSingleThreadExecutor();
         try {
             SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate);
-            BookSnapshot borrowed = day.bookHistory().get(2);
+            BookSnapshot borrowed = SymbolDayGraph.build(day).bookHistory().get(2);
             Future<ItchMessage> read = other.submit(() -> day.message(day.messageCount() - 1));
             assertEquals(ItchMessage.SystemEvent.class, read.get(threadTimeoutSeconds, TimeUnit.SECONDS).getClass());
 
@@ -176,7 +218,7 @@ class SymbolDayTest {
 
             IllegalStateException failure = assertThrows(IllegalStateException.class, () -> day.message(0));
             assertTrue(failure.getMessage().contains("AAPL is CLOSED"), failure.getMessage());
-            assertThrows(IllegalStateException.class, day::graph);
+            assertThrows(IllegalStateException.class, () -> SymbolDayGraph.build(day));
             assertEquals(new BookLevel(150 * price4, 100, 1), borrowed.bestBid(),
                     "a heap child obtained before close stays readable");
             day.close();
@@ -196,8 +238,7 @@ class SymbolDayTest {
         Files.write(partition, new byte[] {1, 2, 3}, StandardOpenOption.APPEND);
         NativeAccounting.Snapshot before = NativeAccounting.snapshot();
 
-        assertThrows(RuntimeException.class, () -> SymbolDay.materialize(scripted, SyntheticItchDay.googLocate, budget,
-                MaterializationWeight.Coefficients.initial));
+        assertThrows(RuntimeException.class, () -> SymbolDay.materialize(scripted, SyntheticItchDay.googLocate, budget));
         assertEquals(1, budget.acquired.get());
         assertEquals(1, budget.released.get(), "the lease came back");
         assertEquals(before.daysLive(), NativeAccounting.snapshot().daysLive());
@@ -209,7 +250,7 @@ class SymbolDayTest {
     void oversizedDayFailsBeforeAcquiring() {
         RecordingBudget budget = new RecordingBudget(1);
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, () -> SymbolDay.materialize(
-                scripted, SyntheticItchDay.aaplLocate, budget, MaterializationWeight.Coefficients.initial));
+                scripted, SyntheticItchDay.aaplLocate, budget));
         assertTrue(failure.getMessage().contains("more than the budget can ever admit"), failure.getMessage());
         assertEquals(0, budget.acquired.get());
     }
@@ -218,8 +259,7 @@ class SymbolDayTest {
     @Test
     void nativeReleasePrecedesPermitReturnAndCloseIsIdempotent() throws Exception {
         RecordingBudget budget = new RecordingBudget(Long.MAX_VALUE);
-        SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate, budget,
-                MaterializationWeight.Coefficients.initial);
+        SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate, budget);
         long liveBeforeClose = NativeAccounting.snapshot().nativeBytesLive();
         budget.onRelease = () -> assertEquals(liveBeforeClose - day.nativeBytes(),
                 NativeAccounting.snapshot().nativeBytesLive(), "native bytes are released before the permit");
@@ -235,8 +275,7 @@ class SymbolDayTest {
     @Test
     void abandonedDayIsDiagnosedAndReclaimedExactlyOnce() throws Exception {
         RecordingBudget budget = new RecordingBudget(Long.MAX_VALUE);
-        SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.msftLocate, budget,
-                MaterializationWeight.Coefficients.initial);
+        SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.msftLocate, budget);
         NativeAccounting.Snapshot before = NativeAccounting.snapshot();
 
         day.cleanupState().clean();
@@ -260,8 +299,7 @@ class SymbolDayTest {
     void cleanupFailureIsReportedNotHidden() throws Exception {
         RecordingBudget budget = new RecordingBudget(Long.MAX_VALUE);
         budget.onRelease = () -> { throw new IllegalStateException("permit accounting broken"); };
-        SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.googLocate, budget,
-                MaterializationWeight.Coefficients.initial);
+        SymbolDay day = SymbolDay.materialize(scripted, SyntheticItchDay.googLocate, budget);
         day.cleanupState().run();
         assertEquals(1, leaks.size());
         SymbolDayLeakDetector.LeakDiagnostic diagnostic = leaks.getFirst();
@@ -275,15 +313,13 @@ class SymbolDayTest {
     @Test
     void budgetBlocksUntilAPermitReturns() throws Exception {
         SemaphoreBudget budget = new SemaphoreBudget(1);
-        SymbolDay first = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate, budget,
-                MaterializationWeight.Coefficients.initial);
+        SymbolDay first = SymbolDay.materialize(scripted, SyntheticItchDay.aaplLocate, budget);
         CountDownLatch waiting = new CountDownLatch(1);
         AtomicReference<SymbolDay> second = new AtomicReference<>();
         Thread thread = new Thread(() -> {
             try {
                 waiting.countDown();
-                second.set(SymbolDay.materialize(scripted, SyntheticItchDay.msftLocate, budget,
-                        MaterializationWeight.Coefficients.initial));
+                second.set(SymbolDay.materialize(scripted, SyntheticItchDay.msftLocate, budget));
             }
             catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

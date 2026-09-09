@@ -1,5 +1,7 @@
 package tech.kzen.sample.plugin.analysis;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.lib.common.exec.data.type.DataContract;
 import tech.kzen.lib.common.exec.data.value.DataValue;
 import tech.kzen.sample.itch.day.SymbolDay;
@@ -58,7 +60,7 @@ public final class OrderLifecycleRows {
 
 
     public static List<DataValue> rows(SymbolDay day) {
-        List<OrderLifecycle> orders = day.orders();
+        List<OrderLifecycle> orders = SymbolDayGraph.build(day).orders();
         List<DataValue> rows = new ArrayList<>(orders.size());
         for (OrderLifecycle order : orders) {
             rows.add(row(day.symbol(), order));

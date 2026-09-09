@@ -18,7 +18,6 @@ import java.util.stream.StreamSupport;
 public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
     private final ItchStore store;
     private final MaterializationBudget budget;
-    private final MaterializationWeight.Coefficients coefficients;
     private boolean iterated;
     private volatile boolean closed;
 
@@ -28,13 +27,12 @@ public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
     }
 
     public static SymbolDays of(ItchStore store, MaterializationBudget budget) {
-        return new SymbolDays(store, budget, MaterializationWeight.Coefficients.measured);
+        return new SymbolDays(store, budget);
     }
 
-    public SymbolDays(ItchStore store, MaterializationBudget budget, MaterializationWeight.Coefficients coefficients) {
+    public SymbolDays(ItchStore store, MaterializationBudget budget) {
         this.store = store;
         this.budget = budget;
-        this.coefficients = coefficients;
     }
 
 
@@ -63,7 +61,7 @@ public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
                     throw new NoSuchElementException();
                 }
                 try {
-                    return SymbolDay.materialize(store, locates.next(), budget, coefficients);
+                    return SymbolDay.materialize(store, locates.next(), budget);
                 }
                 catch (InterruptedException e) {
                     Thread.currentThread().interrupt();

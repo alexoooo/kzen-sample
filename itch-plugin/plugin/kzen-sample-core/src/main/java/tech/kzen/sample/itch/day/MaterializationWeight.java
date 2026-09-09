@@ -1,17 +1,9 @@
 package tech.kzen.sample.itch.day;
 
 import tech.kzen.sample.itch.store.PartitionStats;
-import tech.kzen.sample.itch.store.StoreFormat;
 
 
-/**
- * What materializing one symbol-day costs, in two parts the host's budget may weigh differently: the native
- * bytes the arena will hold (exact: the partition frames, the shared market-wide frames and the offset index,
- * rounded up to {@link #nativeAlignment}), and an estimate of the peak heap the persistent graph, indexes and
- * reconstruction temporaries reach (linear in the partition's message-family counts). The default coefficients
- * are the ones HS06 measured on a real day ({@link Coefficients#measured}); the placeholders that preceded them
- * stay as {@link Coefficients#initial} for the estimate-versus-observed record.
- */
+/** Native batch storage and estimated graph heap are admitted separately through the same host budget. */
 public record MaterializationWeight(
         long nativeBytes,
         long estimatedHeapBytes
@@ -23,6 +15,16 @@ public record MaterializationWeight(
         return nativeBytes + estimatedHeapBytes;
     }
 
+
+    public static MaterializationWeight batch(PartitionStats own, PartitionStats shared) {
+        long messages = Math.addExact(own.messages(), shared == null ? 0 : shared.messages());
+        long bytes = Math.addExact(own.bytes(), shared == null ? 0 : shared.bytes());
+        return new MaterializationWeight(alignUp(bytes) + alignUp(Math.multiplyExact(messages, offsetIndexBytesPerMessage)), 0);
+    }
+
+    public static MaterializationWeight graph(PartitionStats own, Coefficients coefficients) {
+        return new MaterializationWeight(0, of(own, null, coefficients).estimatedHeapBytes());
+    }
 
     public static MaterializationWeight of(PartitionStats own, PartitionStats shared, Coefficients coefficients) {
         long messages = own.messages() + (shared == null ? 0 : shared.messages());

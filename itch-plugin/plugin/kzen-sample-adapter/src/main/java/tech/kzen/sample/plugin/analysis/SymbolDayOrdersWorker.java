@@ -1,5 +1,7 @@
 package tech.kzen.sample.plugin.analysis;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.auto.common.paradigm.job.api.ChannelInput;
 import tech.kzen.auto.common.paradigm.job.api.ChannelOutput;
 import tech.kzen.auto.common.paradigm.job.control.JobControl;
@@ -27,7 +29,7 @@ public final class SymbolDayOrdersWorker extends JavaTransformWorker {
 
     @Override
     protected Iterator<?> onElementBlocking(Object element, JobControl control) {
-        return SymbolDayElements.require(element, "Symbol-day orders").orders().iterator();
+        return SymbolDayGraph.build(SymbolDayElements.require(element, "Symbol-day orders")).orders().iterator();
     }
 
 

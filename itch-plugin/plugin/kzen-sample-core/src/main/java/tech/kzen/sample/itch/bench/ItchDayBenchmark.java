@@ -237,7 +237,15 @@ public final class ItchDayBenchmark {
                 settle();
                 long retained = used() - heapBefore;
 
-                SymbolDayGraph graph = day.graph();
+                long graphAllocatedBefore = threads.getCurrentThreadAllocatedBytes();
+                long graphStart = System.nanoTime();
+                SymbolDayGraph graph = SymbolDayGraph.build(day);
+                long graphEnd = System.nanoTime();
+                long graphAllocated = threads.getCurrentThreadAllocatedBytes() - graphAllocatedBefore;
+                settle();
+                long graphRetained = used() - heapBefore - retained;
+                System.out.printf(Locale.ROOT, "Graph %s: %.3f s, %.1f MiB allocated, %.1f MiB retained%n",
+                        day.symbol(), (graphEnd - graphStart) / nanosPerSecond, mibD(graphAllocated), mibD(graphRetained));
                 long r0 = System.nanoTime();
                 long replayed = 0;
                 for (int i = 0; i < day.messageCount(); i++) {

@@ -2,35 +2,23 @@ package tech.kzen.sample.itch.day;
 
 import tech.kzen.sample.itch.message.ItchHeader;
 import tech.kzen.sample.itch.message.ItchMessage;
-import tech.kzen.sample.itch.model.BookSnapshot;
-import tech.kzen.sample.itch.model.OrderLifecycle;
-import tech.kzen.sample.itch.model.SymbolDayGraph;
-import tech.kzen.sample.itch.model.TradeEvent;
+import tech.kzen.sample.itch.message.ItchRecord;
 import tech.kzen.sample.itch.store.ItchStore;
 import tech.kzen.sample.itch.store.PartitionStats;
 import tech.kzen.sample.itch.store.StoreFormat;
-import tech.kzen.sample.itch.wire.ItchCursor;
 import tech.kzen.sample.itch.wire.ItchDecoder;
-import tech.kzen.sample.itch.wire.ItchEncoder;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 
 /**
- * One fully materialized symbol-day: the symbol's messages (with the shared market-wide ones merged in) held
- * off-heap in a shared arena, and the persistent analytical graph ({@link SymbolDayGraph}) on the heap. It is
- * the closeable analytical unit: {@link #materialize} acquires the budget lease for its weight before allocating,
- * and {@link #close} drops the graph roots, releases the native storage and only then returns the permit.
- *
- * Lifetime contract: any thread may read while open; a read after close is a named failure; the heap graph a
- * caller still references stays usable after close (close promises native release, not heap reclamation);
- * views that read the arena ({@link #message}) hold this owner. A native release failure keeps the permit —
- * the budget then still reflects the storage that was not freed — and is reported by the exception and in
- * {@link NativeAccounting}. Abandoning a day without close is diagnosed by {@link SymbolDayLeakDetector}.
+ * One complete symbol-day batch, including shared market-wide records in feed order. The Arena and admission
+ * leases belong to this unit. Messages are views into its packed storage and become invalid when it closes.
  */
 public final class SymbolDay implements AutoCloseable {
     public enum State { OPEN, CLOSED, CLOSE_FAILED }
@@ -48,14 +36,17 @@ public final class SymbolDay implements AutoCloseable {
     private final MaterializationBudget.Lease lease;
     private final AtomicReference<State> state = new AtomicReference<>(State.OPEN);
     private final SymbolDayLeakDetector.CleanupState cleanup;
-    private volatile SymbolDayGraph graph;
+    private final MaterializationBudget budget;
+    private final PartitionStats partitionStats;
+    private final List<MaterializationBudget.Lease> heapLeases;
+
 
 
     //-----------------------------------------------------------------------------------------------------------------
     /** Materializes [locate] of [store] under the unlimited budget. */
     public static SymbolDay materialize(ItchStore store, int locate) {
         try {
-            return materialize(store, locate, MaterializationBudget.unlimited(), MaterializationWeight.Coefficients.measured);
+            return materialize(store, locate, MaterializationBudget.unlimited());
         }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -65,16 +56,24 @@ public final class SymbolDay implements AutoCloseable {
 
 
     /**
-     * Acquires a lease for the day's weight (blocking on [budget]), then loads and builds. Any failure or
+     * Acquires a lease for the day's weight (blocking on [budget]), then loads the batch. Any failure or
      * interruption after acquisition releases the native storage and the lease before propagating; an
      * oversized day fails before waiting.
      */
     public static SymbolDay materialize(
-            ItchStore store, int locate, MaterializationBudget budget, MaterializationWeight.Coefficients coefficients
+            ItchStore store, int locate, MaterializationBudget budget
     ) throws InterruptedException {
+        return materialize(store, locate, budget, MaterializationProgress.none);
+    }
+
+
+    public static SymbolDay materialize(
+            ItchStore store, int locate, MaterializationBudget budget, MaterializationProgress progress
+    ) throws InterruptedException {
+        java.util.Objects.requireNonNull(progress);
         PartitionStats own = store.stats(locate);
-        PartitionStats shared = store.partitions().get(ItchHeader.marketWideLocate);
-        MaterializationWeight weight = MaterializationWeight.of(own, shared, coefficients);
+        PartitionStats shared = locate == ItchHeader.marketWideLocate ? null : store.partitions().get(ItchHeader.marketWideLocate);
+        MaterializationWeight weight = MaterializationWeight.batch(own, shared);
         if (!budget.canEverAdmit(weight)) {
             throw new IllegalArgumentException("Symbol-day " + own.symbol() + " (locate " + locate + ") weighs "
                     + weight.total() + " bytes, more than the budget can ever admit");
@@ -82,7 +81,7 @@ public final class SymbolDay implements AutoCloseable {
         MaterializationBudget.Lease lease = budget.acquire(weight);
         Arena arena = Arena.ofShared();
         try {
-            return load(store, locate, own, shared, weight, lease, arena);
+            return load(store, locate, own, shared, weight, lease, arena, budget, progress);
         }
         catch (Throwable failure) {
             try {
@@ -104,54 +103,40 @@ public final class SymbolDay implements AutoCloseable {
 
     private static SymbolDay load(
             ItchStore store, int locate, PartitionStats own, PartitionStats shared, MaterializationWeight weight,
-            MaterializationBudget.Lease lease, Arena arena
+            MaterializationBudget.Lease lease, Arena arena, MaterializationBudget budget, MaterializationProgress progress
     ) throws InterruptedException {
+        progress.update(0, 0);
         long frameBytes = own.bytes() + (shared == null ? 0 : shared.bytes());
         long messages = own.messages() + (shared == null ? 0 : shared.messages());
         MemorySegment frames = arena.allocate(frameBytes, MaterializationWeight.nativeAlignment);
         MemorySegment offsets = arena.allocate(messages * MaterializationWeight.offsetIndexBytesPerMessage,
                 MaterializationWeight.nativeAlignment);
-        SymbolDayGraph.Builder builder = SymbolDayGraph.builder();
-
-        long position = 0;
-        int index = 0;
-        try (ItchCursor cursor = store.replay(locate)) {
-            while (cursor.hasNext()) {
-                ItchMessage message = cursor.next();
-                if (index % interruptCheckInterval == 0 && Thread.interrupted()) {
-                    throw new InterruptedException("Materialization of " + own.symbol() + " interrupted at message " + index);
-                }
-                if (index >= messages) {
-                    throw new IllegalStateException("Store " + store.root() + " replayed more messages for locate "
-                            + locate + " than its catalog counts (" + messages + ")");
-                }
-                byte[] bytes = ItchEncoder.encode(message);
-                long frameLength = StoreFormat.frameHeaderBytes + bytes.length;
-                if (position + frameLength > frameBytes) {
-                    throw new IllegalStateException("Store " + store.root() + " partition " + locate
-                            + " exceeds its catalogued byte size " + frameBytes);
-                }
-                offsets.setAtIndex(ValueLayout.JAVA_LONG, index, position);
-                frames.set(ValueLayout.JAVA_LONG_UNALIGNED, position, message.header().ordinal());
-                frames.set(ValueLayout.JAVA_SHORT_UNALIGNED, position + StoreFormat.ordinalBytes, (short) bytes.length);
-                MemorySegment.copy(bytes, 0, frames, ValueLayout.JAVA_BYTE, position + StoreFormat.frameHeaderBytes,
-                        bytes.length);
-                position += frameLength;
-                index++;
-                builder.observe(message);
-            }
-        }
-        if (index != messages) {
-            throw new IllegalStateException("Store " + store.root() + " replayed " + index + " messages for locate "
-                    + locate + ", catalog counts " + messages);
-        }
-        return new SymbolDay(own.symbol(), locate, arena, frames, offsets, index, weight, lease, builder.build());
+        long[] position = {0};
+        int[] index = {0};
+        store.readRecords(locate, record -> {
+            if (index[0] % interruptCheckInterval == 0 && Thread.interrupted())
+                throw new InterruptedException("Materialization of " + own.symbol() + " interrupted at message " + index[0]);
+            if (index[0] >= messages) throw new IllegalStateException("Store replay exceeds catalog message count");
+            long frameLength = StoreFormat.frameHeaderBytes + record.length();
+            if (position[0] + frameLength > frameBytes) throw new IllegalStateException("Store replay exceeds catalog byte size");
+            offsets.setAtIndex(ValueLayout.JAVA_LONG, index[0], position[0]);
+            frames.set(ValueLayout.JAVA_LONG_UNALIGNED, position[0], record.ordinal());
+            frames.set(ValueLayout.JAVA_SHORT_UNALIGNED, position[0] + StoreFormat.ordinalBytes, (short) record.length());
+            record.copyTo(frames, position[0] + StoreFormat.frameHeaderBytes);
+            position[0] += frameLength;
+            index[0]++;
+            if (index[0] % interruptCheckInterval == 0) progress.update(index[0], position[0]);
+        });
+        if (index[0] != messages || position[0] != frameBytes)
+            throw new IllegalStateException("Store replay differs from catalog counts for " + own.symbol());
+        progress.update(index[0], position[0]);
+        return new SymbolDay(own.symbol(), locate, arena, frames, offsets, index[0], weight, lease, budget, own);
     }
 
 
     private SymbolDay(
             String symbol, int locate, Arena arena, MemorySegment frames, MemorySegment offsets, int messageCount,
-            MaterializationWeight weight, MaterializationBudget.Lease lease, SymbolDayGraph graph
+            MaterializationWeight weight, MaterializationBudget.Lease lease, MaterializationBudget budget, PartitionStats partitionStats
     ) {
         this.symbol = symbol;
         this.locate = locate;
@@ -161,10 +146,12 @@ public final class SymbolDay implements AutoCloseable {
         this.messageCount = messageCount;
         this.nativeBytes = frames.byteSize() + offsets.byteSize();
         this.weight = weight;
-        this.lease = lease;
-        this.graph = graph;
+        this.budget = budget;
+        this.partitionStats = partitionStats;
+        this.heapLeases = new ArrayList<>();
+        this.lease = new BatchLease(weight, lease, heapLeases);
         NativeAccounting.opened(nativeBytes);
-        this.cleanup = SymbolDayLeakDetector.register(this, symbol, nativeBytes, arena, lease);
+        this.cleanup = SymbolDayLeakDetector.register(this, symbol, nativeBytes, arena, this.lease);
     }
 
 
@@ -199,43 +186,36 @@ public final class SymbolDay implements AutoCloseable {
     }
 
 
-    /** Decodes message [index] (feed order, market-wide merged) from the arena; a named failure after close. */
     public ItchMessage message(int index) {
+        return ItchDecoder.view(record(index));
+    }
+
+    public ItchRecord record(int index) {
         requireOpen();
-        if (index < 0 || index >= messageCount) {
-            throw new IndexOutOfBoundsException("Message " + index + " of " + messageCount);
-        }
+        if (index < 0 || index >= messageCount) throw new IndexOutOfBoundsException("Message " + index + " of " + messageCount);
         long position = offsets.getAtIndex(ValueLayout.JAVA_LONG, index);
         long ordinal = frames.get(ValueLayout.JAVA_LONG_UNALIGNED, position);
         int length = Short.toUnsignedInt(frames.get(ValueLayout.JAVA_SHORT_UNALIGNED, position + StoreFormat.ordinalBytes));
-        byte[] bytes = new byte[length];
-        MemorySegment.copy(frames, ValueLayout.JAVA_BYTE, position + StoreFormat.frameHeaderBytes, bytes, 0, length);
-        return ItchDecoder.decode(bytes, 0, length, ordinal);
+        return new ItchRecord(frames, position + StoreFormat.frameHeaderBytes, length, ordinal, this);
     }
 
+    public PartitionStats partitionStats() { return partitionStats; }
 
-    /** The persistent analytical graph; a named failure after close (a reference obtained earlier stays valid). */
-    public SymbolDayGraph graph() {
-        requireOpen();
-        return graph;
-    }
-
-    public List<BookSnapshot> bookHistory() {
-        return graph().bookHistory();
-    }
-
-    public List<OrderLifecycle> orders() {
-        return graph().orders();
-    }
-
-    public List<TradeEvent> trades() {
-        return graph().trades();
+    /** Derived heap data is charged separately and conservatively reserved until the batch closes. */
+    public void reserveHeap(long bytes) {
+        if (bytes < 0) throw new IllegalArgumentException("Negative heap reservation");
+        synchronized (heapLeases) {
+            requireOpen();
+            MaterializationBudget.Lease reservation = budget.tryAcquire(new MaterializationWeight(0, bytes));
+            if (reservation == null) throw new IllegalStateException("Insufficient budget for derived data of " + symbol);
+            heapLeases.add(reservation);
+        }
     }
 
 
     //-----------------------------------------------------------------------------------------------------------------
     /**
-     * Drops the graph roots, releases the native storage, then returns the budget permit; idempotent. If the
+     * Releases the native storage, then returns the budget permits; idempotent. If the
      * native release fails the permit is kept and the failure thrown, so the budget never reports capacity that
      * was not actually freed.
      */
@@ -247,7 +227,6 @@ public final class SymbolDay implements AutoCloseable {
             }
             return;
         }
-        graph = null;
         try {
             arena.close();
         }
@@ -286,6 +265,30 @@ public final class SymbolDay implements AutoCloseable {
         }
     }
 
+
+    private static final class BatchLease implements MaterializationBudget.Lease {
+        private final MaterializationWeight weight;
+        private final MaterializationBudget.Lease nativeLease;
+        private final List<MaterializationBudget.Lease> heapLeases;
+
+        BatchLease(MaterializationWeight weight, MaterializationBudget.Lease nativeLease,
+                List<MaterializationBudget.Lease> heapLeases) {
+            this.weight = weight;
+            this.nativeLease = nativeLease;
+            this.heapLeases = heapLeases;
+        }
+
+        @Override public MaterializationWeight weight() { return weight; }
+        @Override public void close() {
+            try {
+                synchronized (heapLeases) {
+                    for (MaterializationBudget.Lease reservation : heapLeases) reservation.close();
+                    heapLeases.clear();
+                }
+            }
+            finally { nativeLease.close(); }
+        }
+    }
 
     /** Test seam: the detached cleanup state, so the abandoned path can be driven deterministically. */
     SymbolDayLeakDetector.CleanupState cleanupState() {

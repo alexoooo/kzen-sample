@@ -116,7 +116,8 @@ public final class ItchStoreBuilder {
                     throw new ItchStoreException("Build of " + version + " aborted at ordinal " + ordinal);
                 }
                 int length = frames.frameLength();
-                ItchMessage message = ItchDecoder.decode(frames.frame(), 0, length, ordinal);
+                ItchMessage message = ItchDecoder.view(new tech.kzen.sample.itch.message.ItchRecord(
+                        java.lang.foreign.MemorySegment.ofArray(frames.frame()), 0, length, ordinal, null));
                 int locate = message.header().stockLocate();
                 catalog.observe(message);
                 writers.append(locate, ordinal, frames.frame(), length);

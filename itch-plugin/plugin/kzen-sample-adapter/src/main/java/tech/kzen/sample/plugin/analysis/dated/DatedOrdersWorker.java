@@ -1,5 +1,7 @@
 package tech.kzen.sample.plugin.analysis.dated;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.auto.common.paradigm.job.api.ChannelInput;
 import tech.kzen.auto.common.paradigm.job.api.ChannelOutput;
 import tech.kzen.auto.common.paradigm.job.control.JobControl;
@@ -17,7 +19,7 @@ public final class DatedOrdersWorker extends JavaTransformWorker {
     @Override
     protected Iterator<?> onElementBlocking(Object element, JobControl control) {
         var dated = DatedElements.require(element);
-        return dated.day().orders().stream().map(order -> new DatedOrder(dated.date(), dated.symbol(), order)).iterator();
+        return SymbolDayGraph.build(dated.day()).orders().stream().map(order -> new DatedOrder(dated.date(), dated.symbol(), order)).iterator();
     }
     @Override
     protected Class<?> outputClass() { return DatedOrder.class; }

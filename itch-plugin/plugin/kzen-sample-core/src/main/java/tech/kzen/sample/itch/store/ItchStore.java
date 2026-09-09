@@ -2,6 +2,8 @@ package tech.kzen.sample.itch.store;
 
 import tech.kzen.sample.itch.message.ItchHeader;
 import tech.kzen.sample.itch.message.ItchMessage;
+import tech.kzen.sample.itch.message.ItchRecord;
+import java.lang.foreign.MemorySegment;
 import tech.kzen.sample.itch.wire.ItchCursor;
 import tech.kzen.sample.itch.wire.ItchDecoder;
 import tech.kzen.sample.itch.wire.ItchFormatException;
@@ -154,6 +156,26 @@ public final class ItchStore {
     }
 
 
+    /** The record is borrowed for the duration of the callback; only the batch loader retains its bytes. */
+    public interface RecordConsumer {
+        void accept(ItchRecord record) throws InterruptedException;
+    }
+
+    public void readRecords(int locate, RecordConsumer consumer) throws InterruptedException {
+        stats(locate);
+        try (PartitionCursor own = new PartitionCursor(partitionFile(locate));
+             PartitionCursor shared = locate != ItchHeader.marketWideLocate && partitionsByLocate.containsKey(ItchHeader.marketWideLocate)
+                     ? new PartitionCursor(partitionFile(ItchHeader.marketWideLocate)) : null) {
+            while (true) {
+                boolean hasOwn = own.hasNext();
+                boolean hasShared = shared != null && shared.hasNext();
+                if (!hasOwn && !hasShared) return;
+                PartitionCursor next = !hasShared || (hasOwn && own.pending.ordinal() < shared.pending.ordinal()) ? own : shared;
+                consumer.accept(next.nextRecord());
+            }
+        }
+    }
+
     public ItchCursor replay(String symbol) {
         return replay(locate(symbol));
     }
@@ -210,7 +232,7 @@ public final class ItchStore {
         private final InputStream input;
         private final byte[] header = new byte[StoreFormat.frameHeaderBytes];
         private final byte[] frame = new byte[0xFFFF];
-        private ItchMessage pending;
+        private ItchRecord pending;
         private boolean finished;
 
         PartitionCursor(Path file) {
@@ -246,7 +268,8 @@ public final class ItchStore {
                 if (input.readNBytes(frame, 0, length) != length) {
                     throw new EOFException();
                 }
-                pending = ItchDecoder.decode(frame, 0, length, ordinal);
+                pending = new ItchRecord(MemorySegment.ofArray(frame), 0, length, ordinal, null);
+                ItchDecoder.validate(pending);
                 return true;
             }
             catch (EOFException e) {
@@ -262,9 +285,15 @@ public final class ItchStore {
             if (!hasNext()) {
                 throw new NoSuchElementException();
             }
-            ItchMessage message = pending;
+            ItchRecord record = nextRecord();
+            return ItchDecoder.view(new ItchRecord(MemorySegment.ofArray(record.copyBytes()), 0, record.length(), record.ordinal(), null));
+        }
+
+        ItchRecord nextRecord() {
+            if (!hasNext()) throw new NoSuchElementException();
+            ItchRecord record = pending;
             pending = null;
-            return message;
+            return record;
         }
 
         @Override

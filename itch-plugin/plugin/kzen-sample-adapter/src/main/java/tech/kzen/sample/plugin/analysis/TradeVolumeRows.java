@@ -1,5 +1,7 @@
 package tech.kzen.sample.plugin.analysis;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.lib.common.exec.data.type.DataContract;
 import tech.kzen.lib.common.exec.data.value.DataValue;
 import tech.kzen.sample.itch.analysis.SymbolTradeSummary;
@@ -57,7 +59,7 @@ public final class TradeVolumeRows {
 
     /** One materialized symbol-day's standing trades. */
     public static DataValue row(SymbolDay day) {
-        long[] standing = day.graph().standingTradeEventsAndShares();
+        long[] standing = SymbolDayGraph.build(day).standingTradeEventsAndShares();
         return row(day.symbol(), standing[0], standing[1]);
     }
 }

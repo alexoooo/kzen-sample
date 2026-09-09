@@ -1,5 +1,7 @@
 package tech.kzen.sample.plugin.analysis.dated;
 
+import tech.kzen.sample.itch.model.SymbolDayGraph;
+
 import tech.kzen.auto.common.paradigm.job.api.ChannelInput;
 import tech.kzen.auto.common.paradigm.job.api.ChannelOutput;
 import tech.kzen.auto.common.paradigm.job.control.JobControl;
@@ -17,7 +19,7 @@ public final class DatedTradeVolumeWorker extends JavaTransformWorker {
     @Override
     protected Iterator<?> onElementBlocking(Object element, JobControl control) {
         var dated = DatedElements.require(element);
-        long[] tally = dated.day().graph().standingTradeEventsAndShares();
+        long[] tally = SymbolDayGraph.build(dated.day()).standingTradeEventsAndShares();
         return java.util.List.of(new DatedTradeVolume(dated.date(), dated.symbol(), tally[0], tally[1])).iterator();
     }
     @Override

@@ -14,6 +14,11 @@ public interface MaterializationBudget {
     Lease acquire(MaterializationWeight weight) throws InterruptedException;
 
 
+    /** Nonblocking admission for derived data while a batch already holds a lease; null means unavailable. */
+    default Lease tryAcquire(MaterializationWeight weight) {
+        return null;
+    }
+
     /** Whether [weight] could ever be admitted; the loader consults this before blocking. */
     default boolean canEverAdmit(MaterializationWeight weight) {
         return true;
@@ -37,6 +42,8 @@ public interface MaterializationBudget {
 
     enum Unlimited implements MaterializationBudget {
         instance;
+
+        @Override public Lease tryAcquire(MaterializationWeight weight) { return acquire(weight); }
 
         @Override
         public Lease acquire(MaterializationWeight weight) {
