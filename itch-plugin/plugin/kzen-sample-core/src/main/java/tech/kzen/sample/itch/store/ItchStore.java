@@ -7,13 +7,10 @@ import java.lang.foreign.MemorySegment;
 import tech.kzen.sample.itch.wire.ItchCursor;
 import tech.kzen.sample.itch.wire.ItchDecoder;
 import tech.kzen.sample.itch.wire.ItchFormatException;
+import tech.kzen.sample.itch.store.block.PartitionBlocks;
+import tech.kzen.sample.itch.day.MaterializationProgress;
 
-import java.io.BufferedInputStream;
-import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -102,6 +99,10 @@ public final class ItchStore {
         return manifest;
     }
 
+    public boolean isCurrent() {
+        return directory.getFileName().toString().equals(currentVersionNameOrNull(root));
+    }
+
     /** Every partition including locate 0, keyed by locate. */
     public SortedMap<Integer, PartitionStats> partitions() {
         return Collections.unmodifiableSortedMap(partitionsByLocate);
@@ -149,10 +150,12 @@ public final class ItchStore {
             return ItchCursor.adopt(new PartitionCursor(partitionFile(locate)));
         }
         PartitionCursor own = new PartitionCursor(partitionFile(locate));
-        PartitionCursor shared = partitionsByLocate.containsKey(ItchHeader.marketWideLocate)
-                ? new PartitionCursor(partitionFile(ItchHeader.marketWideLocate))
-                : null;
-        return ItchCursor.adopt(shared == null ? own : new MergedCursor(own, shared));
+        try {
+            PartitionCursor shared = partitionsByLocate.containsKey(ItchHeader.marketWideLocate)
+                    ? new PartitionCursor(partitionFile(ItchHeader.marketWideLocate)) : null;
+            return ItchCursor.adopt(shared == null ? own : new MergedCursor(own, shared));
+        }
+        catch (Throwable failure) { own.close(); throw failure; }
     }
 
 
@@ -196,8 +199,39 @@ public final class ItchStore {
     }
 
 
-    private Path partitionFile(int locate) {
+    public Path partitionFile(int locate) {
         return ItchStoreBuilder.partitionFile(directory.resolve(StoreFormat.partitionsDirectoryName), locate);
+    }
+
+    public void loadPartition(int locate, MemorySegment destination, PartitionBlocks.Decoder decoder,
+            byte[] prefix, MaterializationProgress progress) throws InterruptedException {
+        PartitionStats expected = stats(locate);
+        long position = 0, messages = 0, previousOrdinal = -1;
+        try (var reader = new PartitionBlocks.Reader(partitionFile(locate), prefix, decoder)) {
+            while (reader.next()) {
+                if (Thread.interrupted()) throw new InterruptedException("Partition load interrupted");
+                int size = reader.rawBytes();
+                if (size > destination.byteSize() - position) throw new ItchStoreException("Partition exceeds catalog bytes");
+                reader.decompress(destination.asSlice(position, size));
+                long end = position + size;
+                int count = 0;
+                while (position < end) {
+                    if (end - position < StoreFormat.frameHeaderBytes) throw new ItchStoreException("Truncated record header");
+                    long ordinal = destination.get(StoreFormat.ordinalLayout, position);
+                    int length = Short.toUnsignedInt(destination.get(StoreFormat.lengthLayout, position + StoreFormat.ordinalBytes));
+                    if (ordinal <= previousOrdinal || length < 11 || length > end - position - StoreFormat.frameHeaderBytes)
+                        throw new ItchStoreException("Invalid partition record at " + position);
+                    previousOrdinal = ordinal;
+                    position += StoreFormat.frameHeaderBytes + length;
+                    count++;
+                }
+                if (count != reader.records()) throw new ItchStoreException("Block record count differs");
+                messages += count;
+                progress.update(messages, position);
+            }
+        }
+        if (position != expected.bytes() || messages != expected.messages())
+            throw new ItchStoreException("Partition differs from catalog counts for " + expected.symbol());
     }
 
 
@@ -226,23 +260,21 @@ public final class ItchStore {
     //-----------------------------------------------------------------------------------------------------------------
     /** Decodes one partition file's frames in stored (feed) order. */
     static final class PartitionCursor implements Iterator<ItchMessage>, AutoCloseable {
-        private static final int readAheadBytes = 1 << 16;
-
         private final Path file;
-        private final InputStream input;
-        private final byte[] header = new byte[StoreFormat.frameHeaderBytes];
-        private final byte[] frame = new byte[0xFFFF];
+        private final PartitionBlocks.Reader input;
+        private final byte[] frame = new byte[PartitionBlocks.maximumRawBytes];
+        private final MemorySegment segment = MemorySegment.ofArray(frame);
+        private int position;
+        private int limit;
+        private int blockRecords;
+        private int consumedRecords;
+        private long previousOrdinal = -1;
         private ItchRecord pending;
         private boolean finished;
 
         PartitionCursor(Path file) {
             this.file = file;
-            try {
-                this.input = new BufferedInputStream(Files.newInputStream(file), readAheadBytes);
-            }
-            catch (IOException e) {
-                throw new ItchStoreException("Unable to open partition " + file, e);
-            }
+            this.input = new PartitionBlocks.Reader(file);
         }
 
         @Override
@@ -253,31 +285,29 @@ public final class ItchStore {
             if (finished) {
                 return false;
             }
-            try {
-                int headerRead = input.readNBytes(header, 0, header.length);
-                if (headerRead == 0) {
+            if (position == limit) {
+                if (consumedRecords != blockRecords) throw new ItchStoreException("Block record count differs in " + file);
+                if (!input.next()) {
                     finished = true;
                     return false;
                 }
-                if (headerRead != header.length) {
-                    throw new ItchFormatException("Partition " + file + " truncated inside a frame header");
-                }
-                ByteBuffer buffer = ByteBuffer.wrap(header);
-                long ordinal = buffer.getLong();
-                int length = Short.toUnsignedInt(buffer.getShort());
-                if (input.readNBytes(frame, 0, length) != length) {
-                    throw new EOFException();
-                }
-                pending = new ItchRecord(MemorySegment.ofArray(frame), 0, length, ordinal, null);
-                ItchDecoder.validate(pending);
-                return true;
+                input.decompress(frame);
+                position = 0;
+                limit = input.rawBytes();
+                blockRecords = input.records();
+                consumedRecords = 0;
             }
-            catch (EOFException e) {
-                throw new ItchFormatException("Partition " + file + " truncated inside a frame");
-            }
-            catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+            if (limit - position < StoreFormat.frameHeaderBytes) throw new ItchFormatException("Truncated frame header in " + file);
+            long ordinal = segment.get(StoreFormat.ordinalLayout, position);
+            int length = Short.toUnsignedInt(segment.get(StoreFormat.lengthLayout, position + StoreFormat.ordinalBytes));
+            position += StoreFormat.frameHeaderBytes;
+            if (length > limit - position || ordinal <= previousOrdinal) throw new ItchFormatException("Invalid frame in " + file);
+            pending = new ItchRecord(segment, position, length, ordinal, null);
+            ItchDecoder.validate(pending);
+            previousOrdinal = ordinal;
+            position += length;
+            consumedRecords++;
+            return true;
         }
 
         @Override
@@ -298,12 +328,7 @@ public final class ItchStore {
 
         @Override
         public void close() {
-            try {
-                input.close();
-            }
-            catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+            input.close();
         }
     }
 

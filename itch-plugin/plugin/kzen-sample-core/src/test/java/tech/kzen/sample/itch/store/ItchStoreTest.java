@@ -119,9 +119,9 @@ class ItchStoreTest {
 
         assertEquals(5, bounded.partitions().size(), "four symbols plus locate 0, flushed many times under a 64-byte budget");
         for (int locate : unbounded.partitions().keySet()) {
-            byte[] a = Files.readAllBytes(partitionFile(unbounded, locate));
-            byte[] b = Files.readAllBytes(partitionFile(bounded, locate));
-            assertArrayEquals(a, b, "locate " + locate);
+            try (var a = unbounded.stream(locate); var b = bounded.stream(locate)) {
+                assertEquals(a.toList(), b.toList(), "locate " + locate);
+            }
         }
     }
 
@@ -218,6 +218,29 @@ class ItchStoreTest {
     private static ItchStore build(Path source, Path store, ItchStoreBuilder builder) {
         builder.build(source, store);
         return ItchStore.open(store);
+    }
+
+    @Test
+    void rejectsMalformedCompressedBlocksAndTracksPhysicalSizes() throws Exception {
+        Path source = temp.resolve("day.itch");
+        SyntheticItchDay.generate(seed, 20).writeTo(source, false);
+        ItchStore store = build(source, temp.resolve("compressed.store"), new ItchStoreBuilder());
+        int locate = SyntheticItchDay.aaplLocate;
+        Path file = partitionFile(store, locate);
+        byte[] valid = Files.readAllBytes(file);
+        assertEquals(valid.length, store.stats(locate).storedBytes());
+        for (int field = 0; field < 4; field++) {
+            byte[] broken = valid.clone();
+            java.nio.ByteBuffer.wrap(broken).putInt(field * Integer.BYTES, Integer.MAX_VALUE);
+            Files.write(file, broken);
+            assertThrows(ItchStoreException.class, () -> {
+                try (var day = tech.kzen.sample.itch.day.SymbolDay.materialize(store, locate)) {}
+            });
+        }
+        Files.write(file, java.util.Arrays.copyOf(valid, valid.length - 1));
+        assertThrows(ItchStoreException.class, () -> {
+            try (var day = tech.kzen.sample.itch.day.SymbolDay.materialize(store, locate)) {}
+        });
     }
 
     private static Path partitionFile(ItchStore store, int locate) {

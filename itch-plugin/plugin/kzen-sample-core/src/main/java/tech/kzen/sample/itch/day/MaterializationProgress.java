@@ -7,4 +7,6 @@ public interface MaterializationProgress {
 
     /** Called after admission, periodically while copying, and after the final validated record. */
     void update(long messages, long bytes);
+
+    default void waiting() {}
 }

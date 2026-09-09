@@ -20,6 +20,7 @@ public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
     private final MaterializationBudget budget;
     private boolean iterated;
     private volatile boolean closed;
+    private SymbolDaySession session;
 
 
     public static SymbolDays of(ItchStore store) {
@@ -45,11 +46,11 @@ public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
             throw new IllegalStateException("SymbolDays of " + store.root() + " is single-use");
         }
         iterated = true;
-        Iterator<Integer> locates = store.symbols().values().iterator();
+        session = new SymbolDaySession(store, java.util.List.copyOf(store.symbols().values()), budget);
         return new Iterator<>() {
             @Override
             public boolean hasNext() {
-                return !closed && locates.hasNext();
+                return !closed && session.hasNext();
             }
 
             @Override
@@ -57,11 +58,11 @@ public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
                 if (closed) {
                     throw new IllegalStateException("SymbolDays of " + store.root() + " is closed");
                 }
-                if (!locates.hasNext()) {
+                if (!session.hasNext()) {
                     throw new NoSuchElementException();
                 }
                 try {
-                    return SymbolDay.materialize(store, locates.next(), budget);
+                    return session.next(MaterializationProgress.none);
                 }
                 catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -80,5 +81,6 @@ public final class SymbolDays implements Iterable<SymbolDay>, AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        if (session != null) session.close();
     }
 }

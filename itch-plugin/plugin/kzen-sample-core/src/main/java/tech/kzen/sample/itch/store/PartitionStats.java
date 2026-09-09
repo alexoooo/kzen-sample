@@ -21,18 +21,24 @@ public record PartitionStats(
         long trades,
         long crosses,
         long breaks,
-        long other
+        long other,
+        long storedBytes
 ) {
     public static final String noSymbol = "";
 
     public static PartitionStats empty(int locate, String symbol) {
-        return new PartitionStats(locate, symbol, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        return new PartitionStats(locate, symbol, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
 
     public PartitionStats withSymbol(String newSymbol) {
         return new PartitionStats(locate, newSymbol, messages, bytes, adds, executions, cancels, deletes, replaces,
-                trades, crosses, breaks, other);
+                trades, crosses, breaks, other, storedBytes);
+    }
+
+    public PartitionStats withStoredBytes(long size) {
+        return new PartitionStats(locate, symbol, messages, bytes, adds, executions, cancels, deletes, replaces,
+                trades, crosses, breaks, other, size);
     }
 
 
@@ -51,27 +57,27 @@ public record PartitionStats(
             case ItchMessage.BrokenTrade m -> b++;
             default -> o++;
         }
-        return new PartitionStats(locate, symbol, messages + 1, bytes + frameBytes, a, e, x, d, u, p, q, b, o);
+        return new PartitionStats(locate, symbol, messages + 1, bytes + frameBytes, a, e, x, d, u, p, q, b, o, storedBytes);
     }
 
 
     static final String tsvHeader = "locate\tsymbol\tmessages\tbytes\tadds\texecutions\tcancels\tdeletes\treplaces"
-            + "\ttrades\tcrosses\tbreaks\tother";
+            + "\ttrades\tcrosses\tbreaks\tother\tstoredBytes";
 
     String toTsv() {
         return locate + "\t" + symbol + "\t" + messages + "\t" + bytes + "\t" + adds + "\t" + executions + "\t"
                 + cancels + "\t" + deletes + "\t" + replaces + "\t" + trades + "\t" + crosses + "\t" + breaks + "\t"
-                + other;
+                + other + "\t" + storedBytes;
     }
 
     static PartitionStats fromTsv(String line) {
         String[] f = line.split("\t", -1);
-        if (f.length != 13) {
+        if (f.length != 14) {
             throw new ItchStoreException("Malformed catalog line: " + line);
         }
         return new PartitionStats(Integer.parseInt(f[0]), f[1], Long.parseLong(f[2]), Long.parseLong(f[3]),
                 Long.parseLong(f[4]), Long.parseLong(f[5]), Long.parseLong(f[6]), Long.parseLong(f[7]),
                 Long.parseLong(f[8]), Long.parseLong(f[9]), Long.parseLong(f[10]), Long.parseLong(f[11]),
-                Long.parseLong(f[12]));
+                Long.parseLong(f[12]), Long.parseLong(f[13]));
     }
 }

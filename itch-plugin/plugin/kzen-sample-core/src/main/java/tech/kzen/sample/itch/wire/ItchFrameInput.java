@@ -35,7 +35,7 @@ public final class ItchFrameInput implements AutoCloseable {
         int second = buffered.read();
         buffered.reset();
         if (first == gzipMagicFirst && second == gzipMagicSecond) {
-            return new ItchFrameInput(new GZIPInputStream(buffered, readAheadBytes));
+            return new ItchFrameInput(new BufferedInputStream(new GZIPInputStream(buffered, readAheadBytes), readAheadBytes));
         }
         return new ItchFrameInput(buffered);
     }

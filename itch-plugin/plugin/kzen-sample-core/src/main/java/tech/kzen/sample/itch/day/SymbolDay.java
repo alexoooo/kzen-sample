@@ -6,7 +6,9 @@ import tech.kzen.sample.itch.message.ItchRecord;
 import tech.kzen.sample.itch.store.ItchStore;
 import tech.kzen.sample.itch.store.PartitionStats;
 import tech.kzen.sample.itch.store.StoreFormat;
+import tech.kzen.sample.itch.store.StoreVersionLease;
 import tech.kzen.sample.itch.wire.ItchDecoder;
+import tech.kzen.sample.itch.store.block.PartitionBlocks;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -70,18 +72,36 @@ public final class SymbolDay implements AutoCloseable {
     public static SymbolDay materialize(
             ItchStore store, int locate, MaterializationBudget budget, MaterializationProgress progress
     ) throws InterruptedException {
+        try (var version = new StoreVersionLease(store)) {
+            MaterializationWeight batch = batchWeight(store, locate);
+            MaterializationWeight admission = new MaterializationWeight(batch.nativeBytes(), PartitionBlocks.decoderScratchBytes);
+            if (!budget.canEverAdmit(admission)) throw new IllegalArgumentException("Symbol-day " + store.stats(locate).symbol()
+                    + " and decoding workspace weigh " + admission.total() + " bytes, more than the budget can ever admit");
+            MaterializationBudget.Lease lease = budget.acquire(admission);
+            PartitionBlocks.Decoder decoder;
+            try { decoder = new PartitionBlocks.Decoder(); }
+            catch (Throwable failure) { lease.close(); throw failure; }
+            try (decoder) { return materialize(store, locate, budget, progress, decoder, null, lease); }
+        }
+    }
+
+    static MaterializationWeight batchWeight(ItchStore store, int locate) {
+        return MaterializationWeight.batch(store.stats(locate), locate == ItchHeader.marketWideLocate
+                ? null : store.partitions().get(ItchHeader.marketWideLocate));
+    }
+
+    static SymbolDay materialize(ItchStore store, int locate, MaterializationBudget budget,
+            MaterializationProgress progress, PartitionBlocks.Decoder decoder, byte[] prefix,
+            MaterializationBudget.Lease lease) throws InterruptedException {
         java.util.Objects.requireNonNull(progress);
         PartitionStats own = store.stats(locate);
         PartitionStats shared = locate == ItchHeader.marketWideLocate ? null : store.partitions().get(ItchHeader.marketWideLocate);
         MaterializationWeight weight = MaterializationWeight.batch(own, shared);
-        if (!budget.canEverAdmit(weight)) {
-            throw new IllegalArgumentException("Symbol-day " + own.symbol() + " (locate " + locate + ") weighs "
-                    + weight.total() + " bytes, more than the budget can ever admit");
-        }
-        MaterializationBudget.Lease lease = budget.acquire(weight);
-        Arena arena = Arena.ofShared();
+        Arena arena;
+        try { arena = Arena.ofShared(); }
+        catch (Throwable failure) { lease.close(); throw failure; }
         try {
-            return load(store, locate, own, shared, weight, lease, arena, budget, progress);
+            return load(store, locate, own, shared, weight, lease, arena, budget, progress, decoder, prefix);
         }
         catch (Throwable failure) {
             try {
@@ -103,7 +123,8 @@ public final class SymbolDay implements AutoCloseable {
 
     private static SymbolDay load(
             ItchStore store, int locate, PartitionStats own, PartitionStats shared, MaterializationWeight weight,
-            MaterializationBudget.Lease lease, Arena arena, MaterializationBudget budget, MaterializationProgress progress
+            MaterializationBudget.Lease lease, Arena arena, MaterializationBudget budget, MaterializationProgress progress,
+            PartitionBlocks.Decoder decoder, byte[] prefix
     ) throws InterruptedException {
         progress.update(0, 0);
         long frameBytes = own.bytes() + (shared == null ? 0 : shared.bytes());
@@ -111,26 +132,31 @@ public final class SymbolDay implements AutoCloseable {
         MemorySegment frames = arena.allocate(frameBytes, MaterializationWeight.nativeAlignment);
         MemorySegment offsets = arena.allocate(messages * MaterializationWeight.offsetIndexBytesPerMessage,
                 MaterializationWeight.nativeAlignment);
-        long[] position = {0};
-        int[] index = {0};
-        store.readRecords(locate, record -> {
-            if (index[0] % interruptCheckInterval == 0 && Thread.interrupted())
-                throw new InterruptedException("Materialization of " + own.symbol() + " interrupted at message " + index[0]);
-            if (index[0] >= messages) throw new IllegalStateException("Store replay exceeds catalog message count");
-            long frameLength = StoreFormat.frameHeaderBytes + record.length();
-            if (position[0] + frameLength > frameBytes) throw new IllegalStateException("Store replay exceeds catalog byte size");
-            offsets.setAtIndex(ValueLayout.JAVA_LONG, index[0], position[0]);
-            frames.set(ValueLayout.JAVA_LONG_UNALIGNED, position[0], record.ordinal());
-            frames.set(ValueLayout.JAVA_SHORT_UNALIGNED, position[0] + StoreFormat.ordinalBytes, (short) record.length());
-            record.copyTo(frames, position[0] + StoreFormat.frameHeaderBytes);
-            position[0] += frameLength;
-            index[0]++;
-            if (index[0] % interruptCheckInterval == 0) progress.update(index[0], position[0]);
-        });
-        if (index[0] != messages || position[0] != frameBytes)
+        store.loadPartition(locate, frames.asSlice(0, own.bytes()), decoder, prefix, progress);
+        if (shared != null) store.loadPartition(ItchHeader.marketWideLocate,
+                frames.asSlice(own.bytes(), shared.bytes()), decoder, null,
+                (count, bytes) -> progress.update(own.messages() + count, own.bytes() + bytes));
+        long ownPosition = 0, sharedPosition = own.bytes(), previousOrdinal = -1;
+        int count = Math.toIntExact(messages);
+        for (int index = 0; index < count; index++) {
+            if (index % interruptCheckInterval == 0 && Thread.interrupted())
+                throw new InterruptedException("Materialization of " + own.symbol() + " interrupted at message " + index);
+            boolean takeOwn = ownPosition < own.bytes() && (sharedPosition == frameBytes
+                    || frames.get(StoreFormat.ordinalLayout, ownPosition) < frames.get(StoreFormat.ordinalLayout, sharedPosition));
+            long position = takeOwn ? ownPosition : sharedPosition;
+            if (position >= frameBytes) throw new IllegalStateException("Store replay exceeds catalog message count");
+            long ordinal = frames.get(StoreFormat.ordinalLayout, position);
+            if (ordinal <= previousOrdinal) throw new IllegalStateException("Store replay is not in feed order");
+            previousOrdinal = ordinal;
+            offsets.setAtIndex(ValueLayout.JAVA_LONG, index, position);
+            int length = Short.toUnsignedInt(frames.get(StoreFormat.lengthLayout, position + StoreFormat.ordinalBytes));
+            if (takeOwn) ownPosition += StoreFormat.frameHeaderBytes + length;
+            else sharedPosition += StoreFormat.frameHeaderBytes + length;
+        }
+        if (ownPosition != own.bytes() || sharedPosition != frameBytes)
             throw new IllegalStateException("Store replay differs from catalog counts for " + own.symbol());
-        progress.update(index[0], position[0]);
-        return new SymbolDay(own.symbol(), locate, arena, frames, offsets, index[0], weight, lease, budget, own);
+        progress.update(count, frameBytes);
+        return new SymbolDay(own.symbol(), locate, arena, frames, offsets, count, weight, lease, budget, own);
     }
 
 
@@ -194,8 +220,8 @@ public final class SymbolDay implements AutoCloseable {
         requireOpen();
         if (index < 0 || index >= messageCount) throw new IndexOutOfBoundsException("Message " + index + " of " + messageCount);
         long position = offsets.getAtIndex(ValueLayout.JAVA_LONG, index);
-        long ordinal = frames.get(ValueLayout.JAVA_LONG_UNALIGNED, position);
-        int length = Short.toUnsignedInt(frames.get(ValueLayout.JAVA_SHORT_UNALIGNED, position + StoreFormat.ordinalBytes));
+        long ordinal = frames.get(StoreFormat.ordinalLayout, position);
+        int length = Short.toUnsignedInt(frames.get(StoreFormat.lengthLayout, position + StoreFormat.ordinalBytes));
         return new ItchRecord(frames, position + StoreFormat.frameHeaderBytes, length, ordinal, this);
     }
 

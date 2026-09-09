@@ -5,6 +5,7 @@ import tech.kzen.sample.itch.message.ItchHeader;
 import tech.kzen.sample.itch.message.ItchMessage;
 import tech.kzen.sample.itch.wire.ItchDecoder;
 import tech.kzen.sample.itch.wire.ItchFrameInput;
+import tech.kzen.sample.itch.store.block.PartitionBlocks;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -35,7 +36,7 @@ import java.util.stream.Stream;
  * publishes it by atomically replacing the {@code current} pointer only after the manifest is written, so a
  * reader either finds a complete version or none. Frames are staged in one in-memory buffer per partition and
  * flushed to the partition file (opened in append mode for the duration of the flush) when that buffer reaches
- * the per-partition flush size or when the total staged bytes exceed the build's buffer budget; a real day
+ * the per-partition flush size or when growing the retained buffers would exceed the buffer budget; a real day
  * interleaves thousands of locates message by message, so any scheme that keeps a bounded set of files open
  * thrashes on open/close instead of streaming.
  *
@@ -46,7 +47,7 @@ import java.util.stream.Stream;
  */
 public final class ItchStoreBuilder {
     public static final long defaultBufferBudgetBytes = 512L << 20;
-    static final int partitionFlushBytes = 1 << 20;
+    static final int partitionFlushBytes = PartitionBlocks.maximumRawBytes;
     private static final int initialPartitionBufferBytes = 1 << 12;
     private static final String pointerTemporarySuffix = ".tmp";
 
@@ -57,7 +58,7 @@ public final class ItchStoreBuilder {
         this(defaultBufferBudgetBytes);
     }
 
-    /** [bufferBudgetBytes] bounds the frames staged in memory across all partitions before a bulk flush. */
+    /** Bounds retained partition arrays, including growth copies; codec workspace is fixed and separate. */
     public ItchStoreBuilder(long bufferBudgetBytes) {
         if (bufferBudgetBytes < 1) {
             throw new IllegalArgumentException("A positive buffer budget is required");
@@ -103,6 +104,7 @@ public final class ItchStoreBuilder {
     //-----------------------------------------------------------------------------------------------------------------
     private StoreManifest writeVersion(Path source, Path version, LongPredicate proceed) throws IOException {
         SourceFingerprint fingerprint = SourceFingerprint.of(source);
+        Files.createFile(version.resolve(StoreVersionLease.fileName));
         Path partitions = version.resolve(StoreFormat.partitionsDirectoryName);
         SymbolCatalog catalog = new SymbolCatalog();
         Map<Integer, PartitionStats> stats = new TreeMap<>();
@@ -135,7 +137,7 @@ public final class ItchStoreBuilder {
                 String symbol = partition.locate() == ItchHeader.marketWideLocate || !catalog.contains(partition.locate())
                         ? PartitionStats.noSymbol
                         : catalog.symbol(partition.locate());
-                out.write(partition.withSymbol(symbol).toTsv());
+                out.write(partition.withSymbol(symbol).withStoredBytes(Files.size(partitionFile(partitions, partition.locate()))).toTsv());
                 out.newLine();
             }
         }
@@ -166,9 +168,8 @@ public final class ItchStoreBuilder {
                         && name.startsWith(StoreFormat.versionDirectoryPrefix) && !name.equals(current);
                 boolean stalePointer = Files.isRegularFile(entry)
                         && name.startsWith(StoreFormat.currentPointerFileName + pointerTemporarySuffix);
-                if (staleVersion || stalePointer) {
-                    deleteQuietly(entry);
-                }
+                if (staleVersion) StoreVersionLease.prune(entry, ItchStoreBuilder::deleteQuietly);
+                else if (stalePointer) deleteQuietly(entry);
             }
         }
     }
@@ -197,15 +198,16 @@ public final class ItchStoreBuilder {
     //-----------------------------------------------------------------------------------------------------------------
     /**
      * Per-partition staging buffers under one budget: a partition flushes alone when it reaches
-     * {@link #partitionFlushBytes}; when the total staged exceeds the budget every non-empty partition flushes.
-     * Each flush opens the partition file in append mode, writes once, and closes it.
+     * {@link #partitionFlushBytes}; growth beyond the budget flushes and drops every retained array.
+     * Each flush appends an independent compressed block and closes the file.
      */
     private static final class PartitionWriters implements AutoCloseable {
         private final Path directory;
         private final long budgetBytes;
         private final Map<Integer, PartitionBuffer> buffers = new HashMap<>();
         private final byte[] frameHeader = new byte[StoreFormat.frameHeaderBytes];
-        private long staged;
+        private long allocated;
+        private final PartitionBlocks.Writer codec = new PartitionBlocks.Writer();
 
         PartitionWriters(Path directory, long budgetBytes) {
             this.directory = directory;
@@ -213,16 +215,30 @@ public final class ItchStoreBuilder {
         }
 
         void append(int locate, long ordinal, byte[] frame, int length) throws IOException {
+            int required = StoreFormat.frameHeaderBytes + length;
+            if (required > budgetBytes) throw new IllegalArgumentException("Buffer budget cannot hold one ITCH frame");
             PartitionBuffer buffer = buffers.computeIfAbsent(locate, ignored -> new PartitionBuffer());
+            if (buffer.size() + required > partitionFlushBytes) flush(locate, buffer);
+            if (buffer.size() + required > buffer.bytes.length) {
+                int capacity = (int) Math.min(Math.min(budgetBytes, partitionFlushBytes),
+                        Math.max(initialPartitionBufferBytes, Math.max(buffer.bytes.length * 2, buffer.size() + required)));
+                if (allocated + capacity > budgetBytes) {
+                    flushAll();
+                    buffers.clear();
+                    allocated = 0;
+                    buffer = new PartitionBuffer();
+                    buffers.put(locate, buffer);
+                    capacity = (int) Math.min(budgetBytes, Math.max(initialPartitionBufferBytes, required));
+                }
+                allocated += capacity - buffer.bytes.length;
+                buffer.bytes = Arrays.copyOf(buffer.bytes, capacity);
+            }
             ByteBuffer.wrap(frameHeader).putLong(ordinal).putShort((short) length);
             buffer.write(frameHeader, 0, StoreFormat.frameHeaderBytes);
             buffer.write(frame, 0, length);
-            staged += StoreFormat.frameHeaderBytes + length;
+            buffer.records++;
             if (buffer.size() >= partitionFlushBytes) {
                 flush(locate, buffer);
-            }
-            else if (staged > budgetBytes) {
-                flushAll();
             }
         }
 
@@ -232,9 +248,8 @@ public final class ItchStoreBuilder {
             }
             try (OutputStream out = Files.newOutputStream(partitionFile(directory, locate),
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
-                buffer.writeTo(out);
+                codec.write(out, buffer.bytes, buffer.size(), buffer.records);
             }
-            staged -= buffer.size();
             buffer.reset();
         }
 
@@ -246,21 +261,19 @@ public final class ItchStoreBuilder {
 
         @Override
         public void close() throws IOException {
-            flushAll();
-            buffers.clear();
+            try { flushAll(); }
+            finally { buffers.clear(); codec.close(); }
         }
     }
 
 
     /** A growable byte sink whose backing array is reused across flushes (ByteArrayOutputStream without locking). */
     private static final class PartitionBuffer {
-        private byte[] bytes = new byte[initialPartitionBufferBytes];
+        private byte[] bytes = new byte[0];
         private int size;
+        private int records;
 
         void write(byte[] source, int offset, int length) {
-            if (size + length > bytes.length) {
-                bytes = Arrays.copyOf(bytes, Math.max(bytes.length * 2, size + length));
-            }
             System.arraycopy(source, offset, bytes, size, length);
             size += length;
         }
@@ -269,12 +282,9 @@ public final class ItchStoreBuilder {
             return size;
         }
 
-        void writeTo(OutputStream out) throws IOException {
-            out.write(bytes, 0, size);
-        }
-
         void reset() {
             size = 0;
+            records = 0;
         }
     }
 

@@ -45,7 +45,7 @@ contributed (readers, documents, generated modules), which classes this workspac
 named failure; `plugin.yaml` may declare `spi: 1` so an incompatible build is refused by name at boot.
 
 `mvn package` here produces `kzen-sample-adapter/target/kzen-sample-adapter-*.jar` with its runtime dependencies
-copied to `kzen-sample-adapter/target/lib/` — for this sample just `kzen-sample-core-*.jar`, since the SPI is
+copied to `kzen-sample-adapter/target/lib/` — the core and `zstd-jni`, since the SPI is
 `provided` scope (kzen's own artifacts come from the host and must not be copied along, or the plugin's copy
 would shadow the host's classes). The adapter jar carries `META-INF/kzen/plugin.yaml` (`id: kzen-sample`,
 `spi: 1`). To install:
@@ -110,7 +110,7 @@ symbol-days' native and heap, replay, close, leak accounting) without kzen or a 
 after `mvn -pl kzen-sample-core compile`, on a JDK 25:
 
 ```
-java -Xmx16g -XX:+UseG1GC -cp kzen-sample-core/target/classes tech.kzen.sample.itch.bench.ItchDayBenchmark \
+java -Xmx16g -XX:+UseG1GC --enable-native-access=ALL-UNNAMED -cp "kzen-sample-core/target/classes;kzen-sample-adapter/target/lib/*" tech.kzen.sample.itch.bench.ItchDayBenchmark \
      <data>/sources/<day>.NASDAQ_ITCH50.gz <data> --repeat=3 --largest=3 [--symbols=AAPL,MSFT] [--skip-decode] [--sha256]
 ```
 
@@ -143,6 +143,34 @@ build/libs>` (default: the umbrella sibling's, after `./gradlew :kzen-auto-jvm:j
 the test skips itself when that directory is absent.
 
 ## Packed symbol-day batches
+
+Prepared stores use format v2: locate partitions contain independent, checksummed Zstd level-1 blocks of at most
+1 MiB of complete records. The catalog records logical frame bytes and compressed file bytes separately.
+Preparing a v1 date again rebuilds it from the existing download; no legacy reader or redownload is required.
+
+`SymbolDaySession` loads an ordered selection from a fixed store version. A shared version lease protects all
+of its partitions from cleanup during preparation. Blocks decompress directly into the batch arena; a native
+offset index merges the symbol and market-wide regions in feed order. Record/message APIs and ownership are
+unchanged. Messages are decoded only when requested, and graph construction remains explicit.
+
+Sessions reuse a decoder workspace and optionally prefetch up to 8 MiB of the next selected symbol's compressed
+file on one background reader. Decoder scratch and prefetch buffers are admitted through `MaterializationBudget`.
+When admission is tight, speculative buffers and reusable scratch are released before waiting for a combined
+batch-and-decoder reservation. Closing the session joins the reader and releases its buffers and version lease;
+days already returned still belong to their callers. A direct `SymbolDay.materialize` conservatively holds its
+decoder allowance until the day closes. Preparation bounds retained partition arrays at 512 MiB by default,
+with a separate fixed compression workspace; it does not stage a whole uncompressed day on disk.
+
+To measure prepared-store throughput without constructing graphs, after packaging the sample:
+
+```powershell
+java --enable-native-access=ALL-UNNAMED -Xmx2g -cp "kzen-sample-core/target/classes;kzen-sample-adapter/target/lib/*" `
+    tech.kzen.sample.itch.bench.ItchLoadBenchmark <store> 4 true
+```
+
+The final argument enables prefetch (`false` measures synchronous loading). The benchmark reports bulk disk
+reading separately, then each complete materialize-and-close pass, pull-thread heap allocation, GC time and
+native leak accounting. It does not flush the OS cache; its first pass is not a claimed cold-cache measurement.
 
 `SymbolDay.materialize(store, locate[, budget])` loads the complete batch into one shared Arena, merging market-wide records by ordinal. `batch.record(index)` is a binary handle into that memory; `batch.message(index)` wraps it with the appropriate `ItchMessage` type. Primitive getters read the encoded bytes and text getters allocate only when called. Closing the batch invalidates its record/message views; those views have no independent ownership.
 
