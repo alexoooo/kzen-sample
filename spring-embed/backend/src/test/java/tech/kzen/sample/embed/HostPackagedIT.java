@@ -62,6 +62,10 @@ class HostPackagedIT {
     private static int tradingPort;
     private static int riskPort;
     private static Path catalogCsv;
+    private static com.sun.net.httpserver.HttpServer downloadServer;
+    private static final java.util.concurrent.CountDownLatch downloadEntered = new java.util.concurrent.CountDownLatch(1);
+    private static final java.util.concurrent.CountDownLatch downloadRelease = new java.util.concurrent.CountDownLatch(1);
+    private static final String remoteDay = "12312019.NASDAQ_ITCH50.gz";
 
 
     @BeforeAll
@@ -87,8 +91,40 @@ class HostPackagedIT {
         Path sources = Files.createDirectories(home.resolve("data/sources"));
         SyntheticItchDay.generate(41, 20).writeTo(sources.resolve("12302019.NASDAQ_ITCH50.gz"), true);
         SyntheticItchDay.generate(42, 20).writeTo(sources.resolve("01302020.NASDAQ_ITCH50.gz"), true);
+        Path remoteFixture = temp.resolve("remote.gz");
+        SyntheticItchDay.generate(43, 20).writeTo(remoteFixture, true);
+        byte[] remoteBytes = Files.readAllBytes(remoteFixture);
+        downloadServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        downloadServer.createContext("/" + remoteDay, exchange -> {
+            try (exchange) {
+                exchange.sendResponseHeaders(200, remoteBytes.length);
+                exchange.getResponseBody().write(remoteBytes, 0, 1);
+                exchange.getResponseBody().flush();
+                downloadEntered.countDown();
+                try { downloadRelease.await(30, TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                exchange.getResponseBody().write(remoteBytes, 1, remoteBytes.length - 1);
+            }
+        });
+        downloadServer.start();
+        var savedCatalog = new java.util.Properties();
+        savedCatalog.setProperty(remoteDay + ".url", "http://127.0.0.1:" + downloadServer.getAddress().getPort() + "/" + remoteDay);
+        savedCatalog.setProperty(remoteDay + ".size", Integer.toString(remoteBytes.length));
+        try (var output = Files.newOutputStream(home.resolve("data/catalog.properties"))) { savedCatalog.store(output, "Fixture"); }
         catalogCsv = temp.resolve("dated-volume.csv");
         Path riskNotation = Files.createDirectories(home.resolve("risk/src/main/resources/notation/main"));
+        Files.writeString(riskNotation.resolve("DownloadPreview.yaml"), """
+                main:
+                  is: Job
+                main.workers/Itch:
+                  is: ItchSourceWorker
+                  selection:
+                    - %s
+                  symbols:
+                    - AAPL
+                main.workers/Preview:
+                  is: PreviewWorker
+                """.formatted(remoteDay));
         Files.writeString(riskNotation.resolve("Catalog.yaml"), """
                 main:
                   is: Job
@@ -139,6 +175,8 @@ class HostPackagedIT {
     /** Graceful shutdown through the host's own endpoint (a Windows child has no SIGTERM): workspaces, then Tomcat. */
     @AfterAll
     static void stopHost() throws Exception {
+        downloadRelease.countDown();
+        if (downloadServer != null) downloadServer.stop(0);
         if (host == null) {
             return;
         }
@@ -239,27 +277,15 @@ class HostPackagedIT {
         HttpResponse<String> listed = get(action + "&action=list");
         assertEquals(200, listed.statusCode(), listed.body());
         assertTrue(listed.body().contains("2019-12-30"), listed.body());
-        String selection = java.net.URLEncoder.encode(
-                "[\"12302019.NASDAQ_ITCH50.gz\",\"01302020.NASDAQ_ITCH50.gz\"]", StandardCharsets.UTF_8);
         String validator = "/kzen/risk/action/detached?path=auto-jvm%2Fjob%2Fjob-jvm.yaml&object=JobValidator&host=main%2FCatalog.yaml";
         String beforePreparation = get(validator).body();
         assertTrue(beforePreparation.contains("DatedSymbolDay"), beforePreparation);
         assertFalse(beforePreparation.contains("before running"), beforePreparation);
-        HttpResponse<String> preparing = get(action + "&action=prepare&selection=" + selection);
-        assertEquals(200, preparing.statusCode(), preparing.body());
-        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
-        String ready;
-        do {
-            ready = get(action + "&action=list").body();
-            if (ready.contains("Ready for analysis") && !ready.contains("preparing") && !ready.contains("queued")) break;
-            Thread.sleep(50);
-        } while (System.nanoTime() < deadline);
-        assertTrue(ready.contains("Ready for analysis"), ready);
         HttpResponse<String> validation = get("/kzen/risk/action/detached?path=auto-jvm%2Fjob%2Fjob-jvm.yaml&object=JobValidator&host=main%2FCatalog.yaml");
         assertTrue(validation.body().contains("DatedSymbolDay"), validation.body());
         HttpResponse<String> run = get("/kzen/risk/logic/startRun?path=main%2FCatalog.yaml&object=main");
         assertEquals(200, run.statusCode(), run.body());
-        deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         while ((!Files.exists(catalogCsv) || Files.readAllLines(catalogCsv).size() < 3) && System.nanoTime() < deadline) Thread.sleep(50);
         List<String> rows = Files.readAllLines(catalogCsv);
         assertEquals(3, rows.size(), String.join("\n", rows));
@@ -333,6 +359,60 @@ class HostPackagedIT {
     private static PreviewNode previewField(PreviewNode item, String name) {
         return item.getChildren().stream().filter(child -> child.getName().equals(name)).findFirst()
                 .orElseThrow(() -> new AssertionError("Missing " + name + " in " + item));
+    }
+
+    @Test
+    @Order(3)
+    void runDownloadsWithVisibleProgressAndCanCancelThenRetry() throws Exception {
+        String start = "/kzen/risk/logic/startRun?path=main%2FDownloadPreview.yaml&object=main";
+        String runId = get(start).body().trim().replace("\"", "");
+        assertTrue(downloadEntered.await(10, TimeUnit.SECONDS));
+        String action = "/kzen/risk/action/detached?path=auto-jvm%2Fkzen-sample-embed%2Fcatalog-source.yaml"
+                + "&object=CatalogActions&source=main%2FDownloadPreview.yaml%23main.workers%2FItch";
+        assertTrue(get(action + "&action=list").body().contains("downloading"));
+        String lookup = "/kzen/risk/action/detached?path=auto-jvm%2Flogic%2Flogic-trace.yaml"
+                + "&object=LogicTraceEndpoint&action=lookup-run&query=%2F&run=";
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        String trace;
+        do {
+            trace = get(lookup + runId).body();
+            if (trace.contains("downloading") && trace.contains("downloadBytes")) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertTrue(trace.contains("downloading") && trace.contains("downloadBytes"), trace);
+        assertEquals(200, get("/kzen/risk/logic/cancel?run=" + runId).statusCode());
+        awaitRiskIdle();
+        deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        String catalog;
+        do {
+            catalog = get(action + "&action=list").body();
+            if (catalog.contains("cancelled")) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertTrue(catalog.contains("cancelled"), catalog);
+        downloadRelease.countDown();
+        runId = get(start).body().trim().replace("\"", "");
+        awaitRiskIdle();
+        trace = get(lookup + runId).body();
+        List<PreviewNode> items = new ArrayList<>();
+        collectPreviewItems(Json.Default.parseToJsonElement(trace), items);
+        assertEquals(1, items.size(), trace);
+        assertEquals("AAPL", previewField(items.getFirst(), "symbol").getText());
+        assertTrue(trace.contains("complete"), trace);
+        String budget = get("/kzen-host/budget").body();
+        assertTrue(budget.contains("\"outstandingItems\":0"), budget);
+        assertTrue(budget.contains("\"leaks\":0"), budget);
+    }
+
+    private static void awaitRiskIdle() throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        String status;
+        do {
+            status = get("/kzen/risk/logic/status").body();
+            if (status.contains("\"active\":null")) return;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertTrue(status.contains("\"active\":null"), status);
     }
 
 

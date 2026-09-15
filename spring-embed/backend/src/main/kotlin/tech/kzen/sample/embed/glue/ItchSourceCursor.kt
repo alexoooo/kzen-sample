@@ -6,7 +6,7 @@ import tech.kzen.sample.embed.host.catalog.ItchCatalog
 import tech.kzen.sample.itch.day.DatedSymbolDay
 import tech.kzen.sample.itch.day.MaterializationProgress
 import tech.kzen.sample.itch.day.SymbolDaySession
-import tech.kzen.sample.itch.store.StoreVersionLease
+import tech.kzen.sample.embed.host.catalog.ItchPreparationRequest
 import tech.kzen.sample.itch.message.ItchHeader
 
 /** The selection and progress travel with the cursor across a live edit. No loaded batch is retained here. */
@@ -17,47 +17,81 @@ internal class ItchSourceCursor(
 ): Iterator<DatedSymbolDay>, AutoCloseable {
     private data class UnitOfWork(val file: String, val date: String, val symbol: String, val messages: Long, val bytes: Long)
 
-    private val selected = catalog.selected(selection)
-    private val entries = selected.files()
-    private val stores = selected.stores()
-    private val units = entries.flatMap { entry ->
-        val store = stores.getValue(entry.id())
-        val available = store.symbols().keys
-        val selected = if (symbols.isEmpty()) available.sorted() else symbols.filter { it in available }.distinct().sorted()
-        selected.map { symbol ->
-            val locate = store.locate(symbol)
-            val own = store.stats(locate)
-            val shared = if (locate == ItchHeader.marketWideLocate) null else store.partitions()[ItchHeader.marketWideLocate]
-            UnitOfWork(entry.id(), entry.date().toString(), symbol,
-                own.messages() + (shared?.messages() ?: 0), own.bytes() + (shared?.bytes() ?: 0))
+    private class Analysis(selected: ItchCatalog.Selection, symbols: List<String>) {
+        val entries = selected.files()
+        val stores = selected.stores()
+        val units = entries.flatMap { entry ->
+            val store = stores.getValue(entry.id())
+            val available = store.symbols().keys
+            val selected = if (symbols.isEmpty()) available.sorted() else symbols.filter { it in available }.distinct().sorted()
+            selected.map { symbol ->
+                val locate = store.locate(symbol)
+                val own = store.stats(locate)
+                val shared = if (locate == ItchHeader.marketWideLocate) null else store.partitions()[ItchHeader.marketWideLocate]
+                UnitOfWork(entry.id(), entry.date().toString(), symbol,
+                    own.messages() + (shared?.messages() ?: 0), own.bytes() + (shared?.bytes() ?: 0))
+            }
+        }
+        val files = entries.associate { entry -> entry.id() to units.filter { it.file == entry.id() } }
+        val messagesBefore = units.runningFold(0L) { count, unit -> count + unit.messages }
+        val bytesBefore = units.runningFold(0L) { count, unit -> count + unit.bytes }
+        val fileRanges = run {
+            var offset = 0
+            files.mapValues { (_, selected) -> (offset until offset + selected.size).also { offset += selected.size } }
         }
     }
-    private val files = entries.associate { entry -> entry.id() to units.filter { it.file == entry.id() } }
-    private val messagesBefore = units.runningFold(0L) { count, unit -> count + unit.messages }
-    private val bytesBefore = units.runningFold(0L) { count, unit -> count + unit.bytes }
-    private val fileRanges = run {
-        var offset = 0
-        files.mapValues { (_, selected) -> (offset until offset + selected.size).also { offset += selected.size } }
-    }
+
+    private val entries = catalog.selectionFiles(selection)
+    private val symbols = symbols.toList()
+    private var analysis: Analysis? = null
+    private val units get() = checkNotNull(analysis).units
+    private val stores get() = checkNotNull(analysis).stores
+    private val files get() = checkNotNull(analysis).files
+    private val messagesBefore get() = checkNotNull(analysis).messagesBefore
+    private val bytesBefore get() = checkNotNull(analysis).bytesBefore
+    private val fileRanges get() = checkNotNull(analysis).fileRanges
+    private var preparation: ItchPreparationRequest? = null
+    private var preparationProgress: ItchPreparationRequest.Progress? = null
+    @Volatile private var closed = false
     private var activeIndex = 0
     private var index = 0
     private var messages = 0L
     private var bytes = 0L
-    private var phase = "waiting"
+    private var phase = "queued"
     private var control: JobControl? = null
     private var location: ObjectLocation? = null
     private var lastPublished = 0L
     private var session: SymbolDaySession? = null
     private var sessionFile: String? = null
 
-    private val versions = mutableListOf<StoreVersionLease>()
-    init {
-        check(units.isNotEmpty()) { "No selected symbols occur on the selected dates" }
-        try { stores.values.forEach { versions.add(StoreVersionLease(it)) } }
-        catch (failure: Throwable) {
-            versions.forEach { lease ->
-                try { lease.close() } catch (closeFailure: Throwable) { failure.addSuppressed(closeFailure) }
+    private fun initialize() {
+        check(!closed) { "ITCH cursor is closed" }
+        if (analysis != null) return
+        val request = synchronized(this) {
+            check(!closed) { "ITCH cursor is closed" }
+            catalog.requestPreparation(entries.map { it.id() }).also { preparation = it }
+        }
+        try {
+            val selected = request.await { progress ->
+                preparationProgress = progress
+                val changed = phase != progress.phase()
+                phase = progress.phase()
+                publish(changed)
             }
+            val ready = Analysis(selected, symbols)
+            check(ready.units.isNotEmpty()) { "No selected symbols occur on the selected dates" }
+            synchronized(this) {
+                check(!closed) { "ITCH cursor is closed" }
+                analysis = ready
+            }
+            phase = "reading"
+            publish(true)
+        }
+        catch (failure: Throwable) {
+            analysis = null
+            phase = "stopped"
+            try { request.close() } catch (closeFailure: Throwable) { failure.addSuppressed(closeFailure) }
+            try { publish(true) } catch (progressFailure: Throwable) { failure.addSuppressed(progressFailure) }
             throw failure
         }
     }
@@ -69,6 +103,7 @@ internal class ItchSourceCursor(
     }
 
     override fun hasNext(): Boolean {
+        initialize()
         if (index < units.size) return true
         phase = "complete"
         return false
@@ -127,6 +162,18 @@ internal class ItchSourceCursor(
     }
 
     fun progress(): Map<String, Any?> {
+        if (analysis == null) {
+            val pending = preparationProgress
+            return mapOf("itch" to mapOf(
+                "phase" to phase, "preparation" to true,
+                "file" to (pending?.file() ?: entries.first().id()),
+                "date" to (pending?.date() ?: entries.first().date().toString()),
+                "fileIndex" to (pending?.fileIndex() ?: 1).toString(),
+                "totalFiles" to entries.size.toString(),
+                "downloadBytes" to (pending?.bytes() ?: 0).toString(),
+                "downloadTotalBytes" to (pending?.totalBytes() ?: -1).toString(),
+                "detail" to (pending?.detail() ?: "Waiting to prepare selected dates")))
+        }
         val current = units[activeIndex]
         fun counts(start: Int, end: Int): Map<String, Any> {
             val completedEnd = index.coerceIn(start, end)
@@ -162,13 +209,17 @@ internal class ItchSourceCursor(
     }
 
     override fun close() {
+        synchronized(this) {
+            if (closed) return
+            closed = true
+        }
         if (phase != "complete") phase = "stopped"
         try { publish(true) }
         finally {
             try { session?.close() }
             finally {
-                versions.forEach { it.close() }
-                session = null; control = null; location = null
+                try { preparation?.close() }
+                finally { session = null; control = null; location = null }
             }
         }
     }

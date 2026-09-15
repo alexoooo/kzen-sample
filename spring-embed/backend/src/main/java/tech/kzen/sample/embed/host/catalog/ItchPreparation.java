@@ -9,11 +9,17 @@ final class ItchPreparation {
     volatile long bytes;
     volatile boolean cancelled;
     volatile boolean finished;
+    final java.util.concurrent.CountDownLatch completion = new java.util.concurrent.CountDownLatch(1);
+    int consumers;
+    boolean manual;
+    volatile Throwable failure;
+    volatile tech.kzen.sample.itch.store.ItchStore store;
+    tech.kzen.sample.itch.store.StoreVersionLease version;
     private Thread thread;
     private InputStream input;
 
     synchronized void started() { thread = Thread.currentThread(); }
-    synchronized void finished() { thread = null; input = null; finished = true; }
+    synchronized void finished() { thread = null; input = null; finished = true; completion.countDown(); }
     synchronized void input(InputStream value) throws IOException {
         input = value;
         if (cancelled && value != null) value.close();

@@ -320,6 +320,33 @@ class CatalogSourceDisplay(props: CatalogSourceDisplayProps):
     private fun ChildrenBuilder.renderProgress() {
         val progress = props.common.progress?.progressMap?.get("itch") as? Map<*, *> ?: return
         fun number(map: Map<*, *>, key: String) = map[key]?.toString()?.toLongOrNull() ?: 0L
+        if (progress["preparation"] == true) {
+            div {
+                css { borderTop = Border(1.px, LineStyle.solid, Color("#e5e7eb")); paddingTop = 0.5.em }
+                val phase = progress["phase"]
+                val label = when (phase) {
+                    "downloading" -> "Downloading"
+                    "verifying" -> "Verifying download"
+                    "preparing" -> "Preparing analysis data"
+                    "stopped" -> "Preparation stopped"
+                    else -> "Waiting to prepare"
+                }
+                div { +"$label · File ${progress["fileIndex"]} of ${progress["totalFiles"]}: ${progress["date"]}" }
+                div { +progress["detail"].toString() }
+                val total = number(progress, "downloadTotalBytes")
+                val done = number(progress, "downloadBytes")
+                if (phase == "downloading") div {
+                    +(if (total > 0) "${formatSize(done)} / ${formatSize(total)}" else formatSize(done))
+                }
+                if (phase != "stopped") react.dom.html.ReactHTML.progress {
+                    css { width = 100.pct; height = 8.px }
+                    if (phase == "downloading" && total > 0) {
+                        value = done.toDouble(); max = total.toDouble()
+                    }
+                }
+            }
+            return
+        }
         fun ChildrenBuilder.counts(map: Map<*, *>) {
             table {
                 css { width = 100.pct; fontSize = 0.85.em; borderCollapse = BorderCollapse.collapse }

@@ -138,15 +138,67 @@ public final class ItchCatalog implements AutoCloseable {
 
     public synchronized void prepare(List<String> ids) {
         if (ids.isEmpty()) throw new IllegalArgumentException("Select at least one date");
-        List<ItchCatalogFile> selected = ids.stream().distinct().map(this::requireFile).toList();
+        List<ItchCatalogFile> selected = selectionFiles(ids);
         for (ItchCatalogFile file : selected) {
-            ItchPreparation previous = tasks.get(file.id());
-            if (previous != null && !previous.finished) continue;
             if (downloaded(file) && freshStore(file) != null) { tasks.remove(file.id()); continue; }
-            ItchPreparation task = new ItchPreparation();
-            tasks.put(file.id(), task);
-            queue.submit(() -> prepare(file, task));
+            preparation(file).manual = true;
         }
+    }
+
+    private ItchPreparation preparation(ItchCatalogFile file) {
+        ItchPreparation previous = tasks.get(file.id());
+        if (previous != null && !previous.finished && !previous.cancelled) return previous;
+        ItchPreparation task = new ItchPreparation();
+        tasks.put(file.id(), task);
+        // The single queue finishes cancelled-task cleanup before starting its replacement.
+        queue.submit(() -> prepare(file, task));
+        return task;
+    }
+
+    public synchronized List<ItchCatalogFile> selectionFiles(List<String> ids) {
+        if (ids.isEmpty()) throw new IllegalArgumentException("Select at least one date");
+        return ids.stream().distinct().map(this::requireFile)
+                .sorted(Comparator.comparing(ItchCatalogFile::date).thenComparing(ItchCatalogFile::id)).toList();
+    }
+
+    public synchronized ItchPreparationRequest requestPreparation(List<String> ids) {
+        var selected = selectionFiles(ids);
+        var pending = new LinkedHashMap<String, ItchPreparation>();
+        var ready = new LinkedHashMap<String, ItchStore>();
+        try {
+            for (var file : selected) {
+                var store = downloaded(file) ? freshStore(file) : null;
+                if (store != null) ready.put(file.id(), store);
+                else {
+                    var task = preparation(file);
+                    task.consumers++;
+                    pending.put(file.id(), task);
+                }
+            }
+            return new ItchPreparationRequest(this, selected, pending, ready);
+        }
+        catch (RuntimeException | Error failure) {
+            try { releasePreparation(pending); } catch (RuntimeException e) { failure.addSuppressed(e); }
+            throw failure;
+        }
+    }
+
+    synchronized void releasePreparation(Map<String, ItchPreparation> pending) {
+        RuntimeException failure = null;
+        for (var task : pending.values()) {
+            task.consumers--;
+            if (task.consumers == 0) {
+                if (!task.manual && !task.finished) task.cancel();
+                if (task.version != null) {
+                    try { task.version.close(); }
+                    catch (RuntimeException e) {
+                        if (failure == null) failure = e; else failure.addSuppressed(e);
+                    }
+                    finally { task.version = null; }
+                }
+            }
+        }
+        if (failure != null) throw failure;
     }
 
     public synchronized void cancel(List<String> ids) {
@@ -171,12 +223,16 @@ public final class ItchCatalog implements AutoCloseable {
             }
             checkCancelled(task);
             synchronized (this) {
-                if (freshStore(file) == null) throw new IllegalStateException("Prepared store is not fresh");
+                task.store = freshStore(file);
+                if (task.store == null) throw new IllegalStateException("Prepared store is not fresh");
+                if (task.consumers > 0) task.version = new tech.kzen.sample.itch.store.StoreVersionLease(task.store);
             }
+            checkCancelled(task);
             task.state = "ready";
             task.detail = "Ready for analysis";
         }
         catch (Exception e) {
+            task.failure = e;
             task.state = task.cancelled || Thread.currentThread().isInterrupted() ? "cancelled" : "failed";
             task.detail = task.state.equals("cancelled") ? "Cancelled; retry when ready" : e.getMessage();
         }
