@@ -1,0 +1,23 @@
+ItchSourceWorker:
+  abstract: true
+  is: Worker
+  title: "ITCH"
+  class: tech.kzen.sample.embed.glue.ItchSourceWorker
+  display: CatalogSourceDisplay
+  output: ""
+  selection: []
+  symbols: []
+  meta:
+    selection:
+      is: List
+      of: String
+    symbols:
+      is: List
+      of: String
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self

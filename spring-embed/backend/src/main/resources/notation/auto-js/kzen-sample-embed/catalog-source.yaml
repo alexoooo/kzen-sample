@@ -1,0 +1,5 @@
+CatalogSourceDisplay:
+  is: WorkerDisplay
+  class: tech.kzen.sample.embed.client.catalog.CatalogSourceDisplay$Wrapper
+  attributeEditorManager: AttributeEditorManager
+  attributeViewManager: AttributeViewManager

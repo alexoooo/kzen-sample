@@ -1,0 +1,33 @@
+server:
+  address: 127.0.0.1
+  port: 18280
+
+spring:
+  application:
+    name: kzen-sample-embed-spring
+  mvc:
+    formcontent:
+      # A proxy must relay a PUT / PATCH / DELETE form body as bytes; Boot's FormContentFilter would consume it
+      # into request parameters first and the upstream would receive an empty body (kzen's notation-batch
+      # answered {} through the proxy until this was off).
+      filter:
+        enabled: false
+
+# The host's kzen workspaces: one KzenAutoContext + one loopback CIO server each, all over the one
+# process-global runtime (plugin root and class path are the host's choice). Each workspace lives under
+# <home>/<name>/ (notation in src/main/resources/notation/main, scratch in work/). Ports are loopback-only.
+kzen:
+  home: kzen-home
+  plugin-root:
+  # The host's own market-data services (TradeRepository, OrderBookService, SymbolDayLoader), offered to every
+  # workspace as @Service objects: the ITCH day they load (blank = no day loaded), the durable data area for the
+  # derived store (default <user.home>/kzen-data/itch), and the one weighted budget every materialization acquires from.
+  host:
+    day-file:
+    data-root:
+    budget-bytes: 4294967296
+  workspaces:
+    - name: trading
+      port: 18281
+    - name: risk
+      port: 18282

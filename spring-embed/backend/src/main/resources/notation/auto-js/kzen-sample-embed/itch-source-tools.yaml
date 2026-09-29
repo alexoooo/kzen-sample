@@ -1,0 +1,14 @@
+ItchSourceTool:
+  is: RibbonTool
+  parent: JobGroup_Sources
+  delegate: ItchSourceWorker
+
+ItchTradeVolumeTool:
+  is: RibbonTool
+  parent: JobGroup_Transforms
+  delegate: DatedTradeVolumeWorker
+
+ItchOrdersTool:
+  is: RibbonTool
+  parent: JobGroup_Transforms
+  delegate: DatedOrdersWorker

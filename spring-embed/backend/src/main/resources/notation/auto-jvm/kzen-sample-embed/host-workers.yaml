@@ -1,0 +1,18 @@
+# The host's own Worker archetype, bundled on the application class path (plugin zero): a source over the host's
+# live SymbolDayLoader service — the embedded way into the market data, beside the file route the plugin's
+# reader gives any kzen. Its @Service parameter is bound from KzenAutoHost, so the archetype is available only in
+# a workspace whose host registered a SymbolDayLoader (the Plugin document says which).
+HostSymbolDaySourceWorker:
+  abstract: true
+  is: Worker
+  title: "Host symbol-days"
+  class: tech.kzen.sample.embed.glue.HostSymbolDaySourceWorker
+  output: ""
+  meta:
+    output:
+      is: ChannelOutput
+      creator: JobChannelCreator
+      editor: SelectChannelEditor
+    selfLocation:
+      is: ObjectLocation
+      by: Self

@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The starter *parent* (not a BOM import): only a parent honours the property overrides below, and a
+         BOM import silently kept Boot's own Kotlin (HS02 G2). No spring-boot-maven-plugin: plain jars, the
+         dependencies copied beside the main jar and named in its manifest (HS02 G1). -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>tech.kzen.sample.embed</groupId>
+    <artifactId>kzen-sample-embed-spring</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>kzen-sample-embed-spring</name>
+    <description>A Spring Boot host embedding kzen-auto workspaces in one JVM: one process-global runtime, one
+        context and loopback server per workspace, a streaming servlet proxy under /kzen/{workspace}/, and the
+        sample plugin on the application class path (plugin zero).</description>
+
+
+    <properties>
+        <java.version>25</java.version>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <kzen.version>0.30.0-SNAPSHOT</kzen.version>
+        <kzen.sample.version>0.0.1-SNAPSHOT</kzen.sample.version>
+        <ktor.version>3.5.1</ktor.version>
+
+        <!-- Boot's managed versions that must follow kzen's train, not Boot's (HS02 G2). -->
+        <kotlin.version>2.4.0</kotlin.version>
+        <kotlin-coroutines.version>1.11.0</kotlin-coroutines.version>
+        <kotlin-serialization.version>1.11.0</kotlin-serialization.version>
+        <selenium.version>4.46.0</selenium.version>
+        <junit-jupiter.version>6.1.1</junit-jupiter.version>
+    </properties>
+
+
+    <!-- Conflicts inside kzen-auto-jvm's own tree that Gradle resolves highest-wins and Maven does not. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.6.0-jre</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.errorprone</groupId>
+                <artifactId>error_prone_annotations</artifactId>
+                <version>2.49.0</version>
+            </dependency>
+            <dependency>
+                <groupId>commons-io</groupId>
+                <artifactId>commons-io</artifactId>
+                <version>2.22.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains</groupId>
+                <artifactId>annotations</artifactId>
+                <version>23.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlinx</groupId>
+                <artifactId>kotlinx-io-core-jvm</artifactId>
+                <version>0.9.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlinx</groupId>
+                <artifactId>kotlinx-io-bytestring-jvm</artifactId>
+                <version>0.9.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+
+        <!-- kzen-auto as a library: the server module (context, Ktor routes, the JS bundle resource), the SPI
+             types (kzen-auto-common-jvm is published at runtime scope, so it is named here), and the CIO engine
+             the per-workspace loopback servers run on (Netty stays inert on the class path). -->
+        <dependency>
+            <groupId>tech.kzen.auto</groupId>
+            <artifactId>kzen-auto-jvm</artifactId>
+            <version>${kzen.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kzen.auto</groupId>
+            <artifactId>kzen-auto-common-jvm</artifactId>
+            <version>${kzen.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-server-cio-jvm</artifactId>
+            <version>${ktor.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>tech.kzen.sample.embed</groupId>
+            <artifactId>kzen-sample-embed-ui-jvm</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- The sample plugin as ordinary dependencies: plugin zero, the embedded-host way in. -->
+        <dependency>
+            <groupId>tech.kzen.sample.plugin</groupId>
+            <artifactId>kzen-sample-adapter</artifactId>
+            <version>${kzen.sample.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kzen.sample.plugin</groupId>
+            <artifactId>kzen-sample-core</artifactId>
+            <version>${kzen.sample.version}</version>
+        </dependency>
+
+        <!-- The Kotlin glue Worker (a @Reflect CursorSourceWorker taking a @Service host interface) is the one
+             Kotlin source; the stdlib arrives through kzen-auto-jvm at kzen's pinned version. -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+            <version>${kotlin.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- The synthetic ITCH day (the core's test jar) for the host's own tests and the governed-route IT. -->
+        <dependency>
+            <groupId>tech.kzen.sample.plugin</groupId>
+            <artifactId>kzen-sample-core</artifactId>
+            <version>${kzen.sample.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+
+    <build>
+        <plugins>
+            <!-- Mixed Kotlin + Java: Kotlin first (it sees the Java sources), then javac; the usual recipe. -->
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+                <version>${kotlin.version}</version>
+                <configuration>
+                    <jvmTarget>25</jvmTarget>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>compile</id>
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <sourceDirs>
+                                <sourceDir>${project.basedir}/src/main/kotlin</sourceDir>
+                                <sourceDir>${project.basedir}/src/main/java</sourceDir>
+                            </sourceDirs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- kzen's reflective mirror reads Java constructor parameter names -->
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>none</phase>
+                    </execution>
+                    <execution>
+                        <id>java-compile</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Plain jars: main jar + lib/ (unshaded, no repackage). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <configuration>
+                    <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                    <includeScope>runtime</includeScope>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>tech.kzen.sample.embed.EmbedApplication</mainClass>
+                            <addClasspath>true</addClasspath>
+                            <classpathPrefix>lib/</classpathPrefix>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!-- Integration tests (*IT) run after `package` over the packaged jar set in child JVMs. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>integration-tests</id>
+                        <phase>integration-test</phase>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
