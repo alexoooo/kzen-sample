@@ -1,0 +1,51 @@
+# The sample plugin's record formats, registered as graph objects of the host's ConfiguredRecordFormat archetype
+# (bundled notation: merged into every workspace this plugin folder is installed in). Each names its reader by
+# class; the reader itself is discovered through META-INF/services. Automatic detection considers a format
+# through its reader's probe — by content, never by file name alone.
+
+# NASDAQ TotalView-ITCH 5.0: a binary feed of length-prefixed messages; gzip sources read through the host's
+# content coding. The attributes are the reader's config: symbols and message types to admit (empty = all) and a
+# time-of-day window in nanoseconds since midnight (blank = open).
+ItchFormat:
+  abstract: true
+  is: ConfiguredRecordFormat
+  class: tech.kzen.sample.plugin.itch.ItchFormat
+  title: "NASDAQ ITCH 5.0"
+  extensions:
+    - itch
+    - nasdaq_itch50
+  catalogVisible: true
+  symbols: []
+  messageTypes: []
+  fromNanos: ""
+  toNanos: ""
+  contentCodings: []
+  meta:
+    symbols:
+      is: List
+      of: String
+    messageTypes:
+      is: List
+      of: String
+    fromNanos: String
+    toNanos: String
+    contentCodings:
+      is: List
+      of: String
+
+ItchDay:
+  is: ItchFormat
+  title: "NASDAQ ITCH 5.0 day"
+
+
+# The world-cities population file: no configuration; detected by its header row.
+WorldCitiesFormat:
+  abstract: true
+  is: ConfiguredRecordFormat
+  class: tech.kzen.sample.plugin.cities.WorldCitiesFormat
+  title: "World cities population"
+  extensions: []
+  catalogVisible: true
+
+WorldCities:
+  is: WorldCitiesFormat

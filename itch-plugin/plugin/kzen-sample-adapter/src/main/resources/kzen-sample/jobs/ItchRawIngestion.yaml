@@ -1,0 +1,16 @@
+# Raw-ingestion demonstration (the plain-library route, small and flat): an expression source streams the
+# core's decoded ItchMessage objects straight from the file — no reader, no store — and the plugin's fold
+# Worker turns the stream into one trade-volume row per symbol. The store-backed SymbolDay Jobs are the
+# canonical route; this one shows the same named result from the raw stream.
+main:
+  is: Job
+
+main.workers/Messages:
+  is: FormulaSourceWorker
+  code: 'tech.kzen.sample.itch.wire.ItchReader(java.nio.file.Path.of("data/kzen-sample/synthetic-day.itch"))'
+
+main.workers/TradeVolume:
+  is: ItchTradeVolumeWorker
+
+main.workers/Preview:
+  is: PreviewWorker

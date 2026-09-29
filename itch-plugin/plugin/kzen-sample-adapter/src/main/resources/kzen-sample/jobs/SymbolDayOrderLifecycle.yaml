@@ -1,0 +1,15 @@
+# Store-backed order lifecycles: one flat row per reconstructed order of every symbol-day (state, executed
+# shares and executions, fill ratio, resting time, the replaced reference), written to a CSV.
+main:
+  is: Job
+
+main.workers/SymbolDays:
+  is: FormulaSourceWorker
+  code: 'tech.kzen.sample.itch.day.SymbolDays.of(tech.kzen.sample.itch.store.ItchDataArea(java.nio.file.Path.of("data/kzen-sample")).ensureStore(java.nio.file.Path.of("data/kzen-sample/synthetic-day.itch"), tech.kzen.sample.itch.store.ItchStoreBuilder()))'
+
+main.workers/Orders:
+  is: SymbolDayOrderLifecycleWorker
+
+main.workers/Csv:
+  is: CsvWriterWorker
+  path: data/kzen-sample/out/symbol-day-orders.csv

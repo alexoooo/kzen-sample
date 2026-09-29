@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>tech.kzen.sample.plugin</groupId>
+        <artifactId>kzen-sample-plugin</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>kzen-sample-adapter</artifactId>
+
+    <properties>
+        <kzen.auto.libs>${project.basedir}/../../kzen-auto/kzen-auto-jvm/build/libs</kzen.auto.libs>
+    </properties>
+
+
+    <dependencies>
+        <dependency>
+            <groupId>tech.kzen.sample.plugin</groupId>
+            <artifactId>kzen-sample-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- The host provides the SPI and everything it drags in (kzen-auto-common, kzen-lib, Kotlin, logging):
+             provided scope keeps them out of the installable jar set, where a copy would shadow the host's. -->
+        <dependency>
+            <groupId>tech.kzen.auto</groupId>
+            <artifactId>kzen-auto-plugin</artifactId>
+            <version>${kzen.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- The Java Worker bases (JavaTransformWorker) live in the server module, not the SPI (HS11); the same
+             provided rule applies. -->
+        <dependency>
+            <groupId>tech.kzen.auto</groupId>
+            <artifactId>kzen-auto-jvm</artifactId>
+            <version>${kzen.version}</version>
+            <scope>provided</scope>
+            <!-- Only the Worker bases are compiled against; the server's own runtime graph (Ktor, telemetry, …)
+                 is the host's business and stays off this build. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>tech.kzen.sample.plugin</groupId>
+            <artifactId>kzen-sample-core</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+    </dependencies>
+
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- kzen's reflective mirror reads Java constructor parameter names -->
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <!-- Installable jar set: this jar plus lib/ (unshaded: the core and any runtime dependency, never the
+                 host's own artifacts) — copy both into one folder under the plugin root. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <configuration>
+                    <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                    <excludeTransitive>false</excludeTransitive>
+                    <stripVersion>false</stripVersion>
+                    <includeScope>runtime</includeScope>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Integration tests (*IT) run after `package` over the installable jar set in target/: the host's
+                 compatibility kit in child JVMs (one plugin universe per process). A second surefire execution
+                 bound to integration-test, since the default execution's patterns leave *IT alone. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>integration-tests</id>
+                        <phase>integration-test</phase>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                            <!-- The host to verify against: a kzen-auto-jvm build/libs (jar + dependencies/);
+                                 the umbrella sibling by default, `-Dkzen.auto.libs=` to point elsewhere. The
+                                 IT skips itself when the directory is absent. -->
+                            <systemPropertyVariables>
+                                <kzen.auto.libs>${kzen.auto.libs}</kzen.auto.libs>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addClasspath>true</addClasspath>
+                            <classpathPrefix>lib/</classpathPrefix>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
