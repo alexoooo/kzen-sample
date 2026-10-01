@@ -1,15 +1,17 @@
 # Embedded Kzen with ITCH market data
 
-Build with Java 25 after publishing kzen-auto and installing kzen-sample-plugin locally (see [AGENTS.md](AGENTS.md)). The sample owns its catalog UI and composes it with Kzen's published client:
+Two parts: `frontend/` (Gradle KMP) and `backend/` (Maven Spring Boot host). They see each other only through
+Maven Local. Build with Java 25 after publishing kzen-auto and installing [`../itch-plugin`](../itch-plugin/README.md)
+locally (see [AGENTS.md](AGENTS.md)). The sample owns its catalog UI and composes it with Kzen's published client:
 
 ```powershell
 cd frontend
 ./gradlew publishToMavenLocal
-cd ..
-mvn -o -B verify
+cd ../backend
+./mvnw -o -B verify
 ```
 
-The frontend JVM artifact carries the shared catalog models and the browser bundle. Launch from this directory:
+The frontend JVM artifact carries the shared catalog models and the browser bundle. Launch from `backend/`:
 
 ```powershell
 & "$env:JAVA_HOME/bin/java" -Xmx16g -XX:+UseG1GC -jar target/kzen-sample-embed-spring-0.0.1-SNAPSHOT.jar
@@ -55,7 +57,7 @@ Store format v2 requires a one-time rebuild for dates prepared with v1, performe
 download is reused. Each run validates its selected sources once and keeps those store versions for its entire
 selection. New runs validate again. The loader decompresses blocks directly into native batch storage and
 prefetches at most 8 MiB of the next symbol's compressed file. Read buffers count toward the host budget;
-prefetch falls back to synchronous reading when memory is tight. See the sample plugin's README for the format,
+prefetch falls back to synchronous reading when memory is tight. See [`../itch-plugin/README.md`](../itch-plugin/README.md) for the format,
 lifetime rules and standalone throughput benchmark. Generic Kzen scheduling and channels are unchanged.
 
 Each `SymbolDay` is one Arena-backed batch of packed ITCH records, including market-wide messages in feed order. `ItchMessage` getters read their `ItchRecord` on demand; loading a batch creates neither decoded field objects nor a state graph. `SymbolDayGraph.build(batch)` computes the graph separately. Batch admission accounts for its native storage; graph construction makes an additional heap reservation, held conservatively until that batch closes. If graph capacity is unavailable, construction fails immediately rather than waiting while holding native capacity. Formula/Preview over the source do not build a graph.
@@ -76,7 +78,7 @@ Prepare the date in the UI first. Existing report URLs without a date and `--kze
 
 ## Verification
 
-`mvn -o -B verify` covers catalog parsing, local fixtures served over HTTP, cancellation, checksums, store reuse, budget ownership, and packaged multi-date execution through the Spring proxy. Tests use isolated data directories and synthetic days; they do not download real market files.
+`./mvnw -o -B verify` in `backend/` covers catalog parsing, local fixtures served over HTTP, cancellation, checksums, store reuse, budget ownership, and packaged multi-date execution through the Spring proxy. Tests use isolated data directories and synthetic days; they do not download real market files.
 
 ### Analysis run progress
 

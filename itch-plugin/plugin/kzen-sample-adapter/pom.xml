@@ -13,7 +13,7 @@
     <artifactId>kzen-sample-adapter</artifactId>
 
     <properties>
-        <kzen.auto.libs>${project.basedir}/../../kzen-auto/kzen-auto-jvm/build/libs</kzen.auto.libs>
+        <kzen.auto.libs>${project.basedir}/../../../../kzen-auto/kzen-auto-jvm/build/libs</kzen.auto.libs>
     </properties>
 
 

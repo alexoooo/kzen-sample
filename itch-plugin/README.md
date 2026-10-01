@@ -1,6 +1,7 @@
-# kzen-sample-plugin
+# itch-plugin
 
-Example plugin for kzen, in two tiers:
+Example plugin for kzen over NASDAQ TotalView-ITCH market data. It has one part, the Maven build in `plugin/`
+(`./mvnw`), in two tiers:
 
 - **`kzen-sample-core`** — a plain-Java analytical core with **no kzen and no Kotlin dependency** (enforced by
   the Maven enforcer): a NASDAQ TotalView-ITCH 5.0 decoder/encoder, a locate-partitioned derived store, an
@@ -44,11 +45,11 @@ reload: put the jars in place and restart. The Plugin document in the UI then li
 contributed (readers, documents, generated modules), which classes this workspace can instantiate, and every
 named failure; `plugin.yaml` may declare `spi: 1` so an incompatible build is refused by name at boot.
 
-`mvn package` here produces `kzen-sample-adapter/target/kzen-sample-adapter-*.jar` with its runtime dependencies
+`./mvnw package` in `plugin/` produces `kzen-sample-adapter/target/kzen-sample-adapter-*.jar` with its runtime dependencies
 copied to `kzen-sample-adapter/target/lib/` — the core and `zstd-jni`, since the SPI is
 `provided` scope (kzen's own artifacts come from the host and must not be copied along, or the plugin's copy
 would shadow the host's classes). The adapter jar carries `META-INF/kzen/plugin.yaml` (`id: kzen-sample`,
-`spi: 1`). To install:
+`spi: 1`). To install, from `plugin/`:
 
 ```
 mkdir <plugin root>/kzen-sample
@@ -83,9 +84,10 @@ executions need the message graph).
 ## Building
 
 For a local snapshot build, publish `kzen-lib` first and then publish `:kzen-auto-plugin` from the `kzen-auto`
-build before running Maven here (`kzen-lib-common-jvm` resolves transitively from Maven Local). Build with a
-JDK 25 and Maven 3.9: `mvn -B package`. `kzen-sample-core` needs neither and can be built alone with
-`mvn -pl kzen-sample-core package`. Both tiers emit Java 25 class files, the same baseline as kzen itself: the
+build before running Maven here (`kzen-lib-common-jvm` resolves transitively from Maven Local). Build from
+`plugin/` with a JDK 25: `./mvnw -B install` (installing is what makes the core and adapter visible to other
+samples, e.g. `../spring-embed`). `kzen-sample-core` needs neither and can be built alone with
+`./mvnw -pl kzen-sample-core package`. Both tiers emit Java 25 class files, the same baseline as kzen itself: the
 host that loads them (`kzen-auto-jvm`, a kzen-project home, or an embedding JVM) must run on Java 25 or newer.
 
 ## Real market data
@@ -103,11 +105,11 @@ Three routes read such a day, and they differ in who governs memory:
 |---|---|---|
 | plain library — `ItchReader(path)` expression → `ItchTradeVolumeWorker` | any kzen workspace | a streaming fold; no materialization |
 | store-backed — `SymbolDays.of(ItchDataArea(root).ensureStore(...))` expression → `SymbolDay*Worker` | any kzen workspace | each symbol-day materialized as one owned element under the core's **unlimited** budget: an expression has no host to receive a budget from |
-| governed — the host's `SymbolDayLoader` handed in as a `@Service` (see `../kzen-sample-embed-spring`) | an embedding host | the same symbol-days admitted by the **host's** weighted budget, shared with the host's own reports |
+| governed — the host's `SymbolDayLoader` handed in as a `@Service` (see `../spring-embed`) | an embedding host | the same symbol-days admitted by the **host's** weighted budget, shared with the host's own reports |
 
 The core's measurement entry point reproduces the sizing record (decode throughput, store build, the largest
-symbol-days' native and heap, replay, close, leak accounting) without kzen or a host — from this directory,
-after `mvn -pl kzen-sample-core compile`, on a JDK 25:
+symbol-days' native and heap, replay, close, leak accounting) without kzen or a host — from `plugin/`,
+after `./mvnw -pl kzen-sample-core compile`, on a JDK 25:
 
 ```
 java -Xmx16g -XX:+UseG1GC --enable-native-access=ALL-UNNAMED -cp "kzen-sample-core/target/classes;kzen-sample-adapter/target/lib/*" tech.kzen.sample.itch.bench.ItchDayBenchmark \
@@ -117,7 +119,7 @@ java -Xmx16g -XX:+UseG1GC --enable-native-access=ALL-UNNAMED -cp "kzen-sample-co
 It writes a Markdown report under `<data>/reports/` and builds (or reuses, when the fingerprint is fresh) the
 derived store under `<data>/stores/`; the first pass over a full day is decode-bound (~10 minutes for 2019-12-30,
 268.7 M messages). The 2019-12-30 record itself is in the umbrella's HS06 and HS25 as-builts
-(`../kzen/docs/plans/in-process-hosting/`).
+(`../../kzen/docs/plans/in-process-hosting/`).
 
 ## Checking compatibility
 
@@ -135,11 +137,11 @@ expression identity, so it runs in its own process. Expectations go on the comma
 1 names every unmet one. From Kotlin, `PluginCompatibilityKit.inspect(root, KitExpectations(...))` returns the
 same report.
 
-`mvn verify` runs this against the freshly packaged jar set (`PluginDirectoryIT`): once as a folder plugin with
+`./mvnw verify` runs this against the freshly packaged jar set (`PluginDirectoryIT`): once as a folder plugin with
 only the host on the class path, once with the same jars on the application class path (plugin zero), each in
 its own child JVM, expecting both readers, both bundled documents, the seven `@Reflect` classes and expression
 identity for the core's `SymbolDays` and `ItchReader`. The host jars come from `-Dkzen.auto.libs=<kzen-auto-jvm
-build/libs>` (default: the umbrella sibling's, after `./gradlew :kzen-auto-jvm:jar :kzen-auto-jvm:copyDependencies`);
+build/libs>` (default: `kzen-auto` checked out beside `kzen-sample`, after `./gradlew :kzen-auto-jvm:jar :kzen-auto-jvm:copyDependencies`);
 the test skips itself when that directory is absent.
 
 ## Packed symbol-day batches
@@ -161,7 +163,7 @@ days already returned still belong to their callers. A direct `SymbolDay.materia
 decoder allowance until the day closes. Preparation bounds retained partition arrays at 512 MiB by default,
 with a separate fixed compression workspace; it does not stage a whole uncompressed day on disk.
 
-To measure prepared-store throughput without constructing graphs, after packaging the sample:
+To measure prepared-store throughput without constructing graphs, from `plugin/` after packaging:
 
 ```powershell
 java --enable-native-access=ALL-UNNAMED -Xmx2g -cp "kzen-sample-core/target/classes;kzen-sample-adapter/target/lib/*" `
@@ -178,4 +180,4 @@ native leak accounting. It does not flush the OS cache; its first pass is not a 
 
 The existing message constructors create packed heap records for authored messages and fixtures. Stream readers copy their reusable input buffers for detached messages; the batch loader copies raw store frames directly into its Arena. Field values and wire format remain unchanged.
 
-`ItchDayBenchmark` reports batch allocation/retained memory separately from graph construction. ITCH-specific integration and tests stay in the sample repositories; Kzen supplies general value, ownership, expression, preview, and display-extension APIs.
+`ItchDayBenchmark` reports batch allocation/retained memory separately from graph construction. ITCH-specific integration and tests stay in the sample repository; Kzen supplies general value, ownership, expression, preview, and display-extension APIs.

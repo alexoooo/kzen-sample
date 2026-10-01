@@ -1,19 +1,23 @@
-# kzen-sample-embed-spring — AI agent guide
+# spring-embed — AI agent guide
 
 A plain-jar Spring Boot host that embeds kzen-auto workspaces in one JVM. It is the *second way in* for the
-market-data sample: the plugin's core and adapter arrive as ordinary Maven dependencies (plugin zero), the host
-owns the runtime, the workspaces, the logging backend and the reverse proxy. Read the umbrella's
-[`../kzen/AGENTS.md`](../kzen/AGENTS.md) first; the design authority is the hosting analysis
-(`../kzen/docs/analysis/2026-09-03_in-process-hosting.md` §5.3) and the HS02 spike as-built
-(`../kzen/docs/plans/in-process-hosting/02-spring-compatibility-spike.md`).
+market-data sample: the plugin's core and adapter (from [`../itch-plugin`](../itch-plugin/README.md)) arrive as
+ordinary Maven dependencies (plugin zero), the host owns the runtime, the workspaces, the logging backend and
+the reverse proxy. Read [`../AGENTS.md`](../AGENTS.md) and the umbrella's
+[`../../kzen/AGENTS.md`](../../kzen/AGENTS.md) first; the design authority is the hosting analysis
+(`../../kzen/docs/analysis/2026-09-03_in-process-hosting.md` §5.3) and the HS02 spike as-built
+(`../../kzen/docs/plans/in-process-hosting/02-spring-compatibility-spike.md`).
 
 ## Layout
 
+Two parts, built separately and seeing each other only through Maven Local. Backend paths below are under
+`backend/`; Java sources under `backend/src/main/java/tech/kzen/sample/embed/`.
+
 | Path | What |
 |---|---|
-| `frontend/` | standalone Gradle KMP build for sample catalog DTOs and client display; publishes `kzen-sample-embed-ui-jvm` with the browser bundle. Kotlin/KSP/wrappers pins track kzen-auto; it is not included in the umbrella composite |
-| `pom.xml` | `spring-boot-starter-parent` 4.1.1 as the **parent** (a BOM import ignores the Kotlin / coroutines / serialization / Selenium overrides), plain jars (`copy-dependencies` → `target/lib/`, manifest `Class-Path`), no `spring-boot-maven-plugin`, the convergence pins HS02 found |
-| `src/main/java/tech/kzen/sample/embed/EmbedApplication.java` | `@SpringBootApplication` entry point |
+| `frontend/` | Gradle KMP part for sample catalog DTOs and client display; publishes `kzen-sample-embed-ui-jvm` with the browser bundle. Kotlin/KSP/wrappers pins track kzen-auto |
+| `backend/pom.xml` | `spring-boot-starter-parent` 4.1.1 as the **parent** (a BOM import ignores the Kotlin / coroutines / serialization / Selenium overrides), plain jars (`copy-dependencies` → `target/lib/`, manifest `Class-Path`), no `spring-boot-maven-plugin`, the convergence pins HS02 found |
+| `EmbedApplication.java` | `@SpringBootApplication` entry point |
 | `config/KzenHostProperties.java` | `kzen.home`, `kzen.plugin-root`, `kzen.workspaces[]{name, port, work-root}` |
 | `workspace/KzenWorkspace.java` | one `KzenAutoContext` (module root `<home>/<name>`, work root `<home>/<name>/work`, `manageLogs=false`) + one loopback CIO server; start = context then server, stop = server then context |
 | `workspace/KzenWorkspaces.java` | `SmartLifecycle` (phase 0): initializes the one `KzenAutoRuntime`, starts the workspaces in order, rolls back the started ones in reverse on a failure, stops them on shutdown; `stopWorkspace(name)` |
@@ -21,35 +25,38 @@ owns the runtime, the workspaces, the logging backend and the reverse proxy. Rea
 | `web/HostController.java` | `/` workspace list, `/kzen-host/workspaces`, `/kzen-host/stats` (live proxy streams, disconnects), `DELETE /kzen-host/workspaces/{name}`, `POST /kzen-host/shutdown` (graceful exit; a Windows child gets no SIGTERM) |
 | `host/` | the host's own market-data objects (HS24): `WeightedBudget` (the arena as a weighted semaphore over the core's `MaterializationBudget`; over-capacity fails before waiting, an interrupted wait acquires nothing, counters in `BudgetStats`), `HostDay` (day file, derived store under the data area, the budget, the leak count from the core's Cleaner-backed detector), `FileTradeRepository` (`TradeRepository`: the day folded through the plain core, no materialization), `GovernedOrderBookService` (`OrderBookService`: a fresh symbol-day per query, closed in a `finally`), `GovernedSymbolDayLoader` (`SymbolDayLoader`: a fresh `SymbolDays` pass per open, every day admitted by the budget as it is pulled), `HostServicesConfig` (the beans, and the same instances registered on `KzenAutoHost` under their interfaces) |
 | `web/HostReportController.java` | the host's reports over those services: `/host/trades`, `/host/book/{symbol}?levels=`, the budget's counters at `/kzen-host/budget`, and `POST /kzen-host/budget/hold?bytes=` / `DELETE /kzen-host/budget/hold/{id}` (a host report occupying the arena — how a test makes kzen wait) |
-| `src/main/kotlin/.../glue/HostSymbolDaySourceWorker.kt` | the Kotlin glue: a `@Reflect` `CursorSourceWorker` taking `@Service SymbolDayLoader`, opening the host's governed cursor (archetype `HostSymbolDaySourceWorker` in `notation/auto-jvm/kzen-sample-embed/host-workers.yaml`) |
-| `src/main/resources/application.yaml`, `logback.xml` | defaults (host 18280, workspaces `trading` 18281 / `risk` 18282, home `kzen-home/`); the host's own console logging |
-| `src/test/java/.../HostPackagedIT.java` | the packaged jar driven over HTTP in child JVMs (see Verification) |
+| `backend/src/main/kotlin/.../glue/HostSymbolDaySourceWorker.kt` | the Kotlin glue: a `@Reflect` `CursorSourceWorker` taking `@Service SymbolDayLoader`, opening the host's governed cursor (archetype `HostSymbolDaySourceWorker` in `notation/auto-jvm/kzen-sample-embed/host-workers.yaml`) |
+| `backend/src/main/resources/application.yaml`, `logback.xml` | defaults (host 18280, workspaces `trading` 18281 / `risk` 18282, home `kzen-home/`); the host's own console logging |
+| `backend/src/test/java/.../HostPackagedIT.java` | the packaged jar driven over HTTP in child JVMs (see Verification) |
 
 ## Build & run
 
-JDK 25 and Maven 3.9 (`~/.m2/wrapper/dists/apache-maven-3.9.9/.../bin/mvn`, `JAVA_HOME` = a JDK 25). Everything the
-host depends on must be in Maven Local first — from their own directories:
+JDK 25 (`JAVA_HOME`); Maven comes from each Maven part's `./mvnw` (3.9.9). Everything the host depends on must
+be in Maven Local first — each from its own directory, paths relative to this sample:
 
 ```
-cd ../kzen-lib && ./gradlew publishToMavenLocal
-cd ../kzen-auto && ./gradlew publishToMavenLocal          # all of kzen-auto, not a subset
-cd ../kzen-sample-plugin && mvn -o -B install              # the plugin's core + adapter (plugin zero here)
-cd ../kzen-sample-embed-spring/frontend && ./gradlew publishToMavenLocal
-cd .. && mvn -o -B verify         # package + the integration tests
-java -jar target/kzen-sample-embed-spring-0.0.1-SNAPSHOT.jar   # http://127.0.0.1:18280/
+cd ../../kzen-lib && ./gradlew publishToMavenLocal
+cd ../../kzen-auto && ./gradlew publishToMavenLocal         # all of kzen-auto, not a subset
+cd ../itch-plugin/plugin && ./mvnw -o -B install            # the plugin's core + adapter (plugin zero here)
+cd frontend && ./gradlew publishToMavenLocal                # the catalog models + browser bundle
+cd backend && ./mvnw -o -B verify                           # package + the integration tests
+java -jar target/kzen-sample-embed-spring-0.0.1-SNAPSHOT.jar   # from backend/; http://127.0.0.1:18280/
 ```
+
+`kzen.home` defaults to `kzen-home`, relative to the working directory, so a launch from `backend/` uses
+`backend/kzen-home/` (git-ignored).
 
 Any property is overridable on the command line: `--server.port=`, `--kzen.home=`, `--kzen.plugin-root=`,
 `--kzen.host.day-file=` (the ITCH day the host's services load), `--kzen.host.data-root=` (derived store; default
 `<user.home>/kzen-data/itch`), `--kzen.host.budget-bytes=` (the shared arena; default 4 GiB), `--kzen.workspaces[0].port=` …
 (an indexed workspace override on the command line replaces the whole yaml list — give every field). A
 workspace's notation lives in `<home>/<name>/src/main/resources/notation/main/` (what kzen's locator expects);
-drop the sample's Job templates there (`../kzen-sample-plugin/README.md`), and a `HostSymbolDaySourceWorker →
+drop the sample's Job templates there (`../itch-plugin/README.md`), and a `HostSymbolDaySourceWorker →
 SymbolDayTradeVolumeWorker → …` Job is the host route over the live loader.
 
 ## Verification
 
-`mvn -o -B verify` runs `HostPackagedIT` in the `integration-test` phase: it launches `target/*.jar` as a child
+`./mvnw -o -B verify` (in `backend/`) runs `HostPackagedIT` in the `integration-test` phase: it launches `target/*.jar` as a child
 process on free ports and checks the portlet page, both prefixed UIs (302 → `index.html` relayed, `index.html`
 200, the JS bundle relayed gzip and inflating to megabytes, an upstream 404 relayed, an unknown workspace 503), a
 fixture Job started through the proxy (`GET /kzen/trading/logic/startRun?path=…&object=main`; a `PUT` form body relayed intact), the run-status SSE stream's first
@@ -85,7 +92,7 @@ curl -X POST "http://127.0.0.1:18290/kzen-host/budget/hold?bytes=3221225472"   #
 with `<home>/trading/src/main/resources/notation/main/HostRouteRealDay.yaml` = `HostSymbolDaySourceWorker →
 SymbolDayTradeVolumeWorker → CsvWriterWorker`. A hold that leaves less than the next symbol-day's weight makes
 the Job (and any governed host query) wait until it is released — do not wait on such a query from the same
-shell that holds the budget. Results are recorded in the HS25 as-built (`../kzen/docs/plans/in-process-hosting/25-*.md`).
+shell that holds the budget. Results are recorded in the HS25 as-built (`../../kzen/docs/plans/in-process-hosting/25-*.md`).
 
 ## Gotchas
 
@@ -109,7 +116,7 @@ shell that holds the budget. Results are recorded in the HS25 as-built (`../kzen
 
 ## ITCH catalog source
 
-The UI workflow and real-day launch command are in [README.md](README.md). The host's `host/catalog/`
+The UI workflow and real-day launch command are in [README.md](README.md). The backend's `host/catalog/`
 package owns Nasdaq catalog parsing, durable download metadata and the single preparation queue shared by
 workspaces. `ItchSourceWorker` receives that `ItchCatalog` as a service and emits `DatedSymbolDay` through
 `CursorSourceWorker`. Its catalog models, actions, and notation-selected display live in this sample. The `frontend/` Gradle build
