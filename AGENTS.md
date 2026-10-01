@@ -5,8 +5,10 @@ requirements, build order) is [README.md](README.md). Read the umbrella's [`../k
 first: its coding standards (`../kzen/docs/CODING_STANDARDS.md`), toolchain pins, file-safety and
 stage-new-files rules apply here too. Then read the guide of the sample you are changing.
 
-This repo is **not** part of the kzen Gradle composite, deliberately: samples consume kzen the way an outside
-user would, as published artifacts.
+Samples consume kzen the way an outside user would, as published artifacts — never through the kzen Gradle
+composite. The umbrella does `includeBuild("../kzen-sample")`, but only for visibility: this repo has no root
+Gradle build, so that include is an empty build that substitutes nothing. Keep it that way — no root
+`settings.gradle`, and no part (e.g. `spring-embed/frontend`) included in the umbrella directly.
 
 ## Layout conventions
 
