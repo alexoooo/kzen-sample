@@ -4,7 +4,6 @@ import tech.kzen.sample.itch.message.ItchMessage;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -12,7 +11,7 @@ import java.util.stream.StreamSupport;
 
 
 /**
- * A raw or gzip ITCH 5.0 day file as an iterable of decoded messages. Each {@link #iterator()} opens the file
+ * A raw ITCH 5.0 day file, or a gzip one named {@code .gz}, as an iterable of decoded messages. Each {@link #iterator()} opens the file
  * afresh and returns an {@link ItchCursor} the caller closes; {@link #forEach} and {@link #stream} own that
  * close themselves.
  */
@@ -33,7 +32,7 @@ public final class ItchReader implements Iterable<ItchMessage> {
     /** Opens the feed; the cursor holds the file handle until closed. */
     public ItchCursor open() {
         try {
-            return ItchCursor.open(Files.newInputStream(path));
+            return ItchCursor.open(path);
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);

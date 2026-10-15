@@ -3,18 +3,20 @@ package tech.kzen.sample.plugin.itch;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.kzen.auto.common.data.api.DataCursor;
+import tech.kzen.auto.common.data.format.ConfiguredRecordFormat;
+import tech.kzen.auto.common.data.format.FileFormatNames;
+import tech.kzen.auto.common.data.model.DataRef;
 import tech.kzen.auto.common.data.read.ContentCapabilityIdentity;
+import tech.kzen.auto.common.data.read.ContentCodingSpec;
 import tech.kzen.auto.common.data.read.ReaderConfig;
+import tech.kzen.auto.common.util.data.DataLocation;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
 import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
-import tech.kzen.auto.plugin.api.data.ReaderProbeResult;
-import tech.kzen.auto.plugin.api.data.ReaderProbeStrength;
 import tech.kzen.lib.common.exec.ExecutionValue;
 import tech.kzen.lib.common.exec.ListExecutionValue;
 import tech.kzen.lib.common.exec.MapExecutionValue;
 import tech.kzen.lib.common.exec.TextExecutionValue;
 import tech.kzen.lib.common.exec.data.type.DataType;
-import tech.kzen.lib.common.exec.data.value.DataValue;
 import tech.kzen.sample.itch.message.ItchMessage;
 import tech.kzen.sample.itch.synth.SyntheticItchDay;
 import tech.kzen.sample.itch.wire.ItchFormatException;
@@ -39,13 +41,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static tech.kzen.sample.plugin.support.ReaderTestSupport.columns;
 import static tech.kzen.sample.plugin.support.ReaderTestSupport.input;
 import static tech.kzen.sample.plugin.support.ReaderTestSupport.open;
-import static tech.kzen.sample.plugin.support.ReaderTestSupport.probe;
 
 
 /**
  * The ITCH reader against the synthetic day: config round trip and validation, the typed projection of every
  * message (raw and, as the host inflates it, gzip), the symbol / type / time filters, bounded inspection,
- * malformed content failing by name, and detection by content only.
+ * malformed content failing by name, and the format chosen by its extensions, its compression by the name.
  */
 class ItchReaderCapabilityTest {
     private static final long seed = 20260905L;
@@ -171,25 +172,21 @@ class ItchReaderCapabilityTest {
 
 
     @Test
-    void probeMatchesByFramingOnlyAndNamesAFalseExtension() throws IOException {
-        SyntheticItchDay day = SyntheticItchDay.generate(seed, 5);
-        Path raw = temp.resolve("probe.itch");
-        day.writeTo(raw, false);
-        byte[] bytes = Files.readAllBytes(raw);
-        byte[] sample = Arrays.copyOf(bytes, Math.min(bytes.length, 4096));
+    void formatIsChosenByItsExtensionsAndGzipByTheName() {
+        ItchFormat format = new ItchFormat(
+                "ITCH", List.of("itch", "nasdaq_itch50"), true, List.of(), List.of(), "", "");
+        List<ConfiguredRecordFormat> formats = List.of(format);
 
-        ReaderProbeResult matched = reader.probeBlocking(probe(ItchReadConfig.all, sample, false, false));
-        ReaderProbeResult.Matched match = assertInstanceOf(ReaderProbeResult.Matched.class, matched);
-        assertEquals(ReaderProbeStrength.ContentStrong, match.getStrength());
-        assertTrue(match.getEvidence().contains("frames decoded"), match.getEvidence());
+        assertEquals(new FileFormatNames.Choice.Named(format), FileFormatNames.INSTANCE.choose("day.itch", formats));
+        assertEquals(new FileFormatNames.Choice.Named(format),
+                FileFormatNames.INSTANCE.choose("12302019.NASDAQ_ITCH50.gz", formats));
+        assertInstanceOf(FileFormatNames.Choice.Unnamed.class, FileFormatNames.INSTANCE.choose("day.bin", formats),
+                "content never names the format, so an unknown extension is unread");
 
-        byte[] text = "Country,City,AccentCity,Region,Population,Latitude,Longitude\nad,aixas,Aixàs,06,,42.48,1.46\n"
-                .getBytes(StandardCharsets.ISO_8859_1);
-        assertEquals(ReaderProbeResult.NoMatch.INSTANCE, reader.probeBlocking(probe(ItchReadConfig.all, text, true, false)),
-                "text content never matches, whatever the name");
-        ReaderProbeResult rejected = reader.probeBlocking(probe(ItchReadConfig.all, text, true, true));
-        assertInstanceOf(ReaderProbeResult.Rejected.class, rejected);
-        assertTrue(((ReaderProbeResult.Rejected) rejected).getReason().contains("does not frame"));
+        assertEquals(List.of(ContentCodingSpec.Companion.getGzip()),
+                format.resolvedRead(ref("12302019.NASDAQ_ITCH50.gz")).getContentCodings());
+        assertEquals(List.of(ContentCodingSpec.Companion.getIdentity()),
+                format.resolvedRead(ref("day.itch")).getContentCodings());
     }
 
 
@@ -217,5 +214,11 @@ class ItchReaderCapabilityTest {
             items.add(new TextExecutionValue(value));
         }
         return new ListExecutionValue(items);
+    }
+
+
+    /** A file reference by name, as a File selection would give it. */
+    private static DataRef ref(String name) {
+        return DataRef.Companion.ofLocation(DataLocation.Companion.of("/data/" + name));
     }
 }

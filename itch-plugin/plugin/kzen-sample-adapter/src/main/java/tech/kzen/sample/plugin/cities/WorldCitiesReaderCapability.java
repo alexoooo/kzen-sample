@@ -6,13 +6,9 @@ import tech.kzen.auto.common.data.read.ReaderCapabilityIdentity;
 import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.lib.common.exec.data.shape.DataShape;
 import tech.kzen.auto.plugin.api.data.BlockingReaderCapability;
-import tech.kzen.auto.plugin.api.data.BlockingReaderProbe;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
 import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
 import tech.kzen.auto.plugin.api.data.ReaderOpenRequest;
-import tech.kzen.auto.plugin.api.data.ReaderProbeRequest;
-import tech.kzen.auto.plugin.api.data.ReaderProbeResult;
-import tech.kzen.auto.plugin.api.data.ReaderProbeStrength;
 import tech.kzen.lib.common.exec.ExecutionValue;
 import tech.kzen.lib.common.exec.MapExecutionValue;
 import tech.kzen.lib.common.exec.data.shape.ShapeProvenance;
@@ -35,10 +31,10 @@ import java.util.NoSuchElementException;
 /**
  * The world-cities population file as a plain-Java reader — the simple sample beside ITCH, Job-only (the
  * former Report definer is retired): no configuration, ISO-8859-1 lines, the header row skipped, each data
- * line a typed {@link WcpRow} record. Detection is by content: the sample must begin with the file's exact
- * header row. Compression is the host's content coding.
+ * line a typed {@link WcpRow} record. Its format declares no extension, so it is only ever selected
+ * explicitly. Compression is the host's content coding, chosen by the file name.
  */
-public final class WorldCitiesReaderCapability extends BlockingReaderCapability implements BlockingReaderProbe {
+public final class WorldCitiesReaderCapability extends BlockingReaderCapability {
     public static final ReaderCapabilityIdentity identity =
             new ReaderCapabilityIdentity("tech.kzen.sample", "world-cities", "1");
 
@@ -48,12 +44,6 @@ public final class WorldCitiesReaderCapability extends BlockingReaderCapability 
     @Override
     public ReaderCapabilityIdentity getIdentity() {
         return identity;
-    }
-
-
-    @Override
-    public String getReaderCompatibility() {
-        return identity.getCompatibility();
     }
 
 
@@ -104,24 +94,6 @@ public final class WorldCitiesReaderCapability extends BlockingReaderCapability 
             }
             return cursor.getShape();
         }
-    }
-
-
-    /**
-     * The exact header row is the file's signature (it outranks the built-in delimited reader's structural
-     * match on the same comma-separated text); a mere `.txt` name never matches.
-     */
-    @Override
-    public ReaderProbeResult probeBlocking(ReaderProbeRequest request) {
-        String head = new String(request.getSample().toByteArray(), StandardCharsets.ISO_8859_1);
-        int lineEnd = head.indexOf('\n');
-        String firstLine = (lineEnd < 0 ? head : head.substring(0, lineEnd)).stripTrailing();
-        if (WcpRow.isHeaderRow(firstLine)) {
-            request.getObserver().completeLogicalRecordsConsidered(1);
-            return new ReaderProbeResult.Matched(
-                    ReaderProbeStrength.ContentSignature, noConfig, "world-cities header row present");
-        }
-        return ReaderProbeResult.NoMatch.INSTANCE;
     }
 
 

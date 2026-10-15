@@ -3,15 +3,13 @@ package tech.kzen.sample.plugin.itch;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.kzen.auto.common.data.format.ConfiguredRecordFormat;
-import tech.kzen.auto.common.data.format.detection.FormatHintMetadata;
+import tech.kzen.auto.common.data.format.FileFormatNames;
 import tech.kzen.auto.common.data.model.DataRef;
-import tech.kzen.auto.common.data.read.ContentCodingSpec;
 import tech.kzen.auto.common.data.read.ResolvedReadSpec;
 import tech.kzen.lib.common.exec.data.shape.DataShape;
 import tech.kzen.lib.common.reflect.Reflect;
 import tech.kzen.lib.common.util.digest.Digest;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -20,9 +18,9 @@ import java.util.Set;
 
 /**
  * The ITCH feed as a registered record format (a graph object of the bundled {@code ItchFormat} archetype):
- * names the reader and carries the reader's config as attributes, is an automatic-detection candidate through
- * the reader's probe, and declares the static shape. A {@code .gz} source gets the gzip content coding unless
- * codings are configured explicitly — the coding contract, never a guess at binary framing from a name.
+ * names the reader and carries the reader's config as attributes, is chosen under Automatic by its extensions
+ * ({@code .itch}, {@code .nasdaq_itch50}), and declares the static shape. A {@code .gz} name gets the gzip
+ * content coding ({@link FileFormatNames}).
  */
 @Reflect
 public final class ItchFormat implements ConfiguredRecordFormat {
@@ -30,16 +28,11 @@ public final class ItchFormat implements ConfiguredRecordFormat {
     public static final String messageTypesAttribute = "messageTypes";
     public static final String fromAttribute = "fromNanos";
     public static final String toAttribute = "toNanos";
-    public static final String contentCodingsAttribute = "contentCodings";
-
-    private static final String structuredFamily = "itch";
 
     private final String title;
     private final List<String> extensions;
     private final boolean catalogVisible;
     private final ItchReadConfig config;
-    private final List<String> contentCodings;
-    private final List<FormatHintMetadata> hintMetadata;
 
 
     public ItchFormat(
@@ -49,8 +42,7 @@ public final class ItchFormat implements ConfiguredRecordFormat {
             List<String> symbols,
             List<String> messageTypes,
             String fromNanos,
-            String toNanos,
-            List<String> contentCodings
+            String toNanos
     ) {
         this.title = title;
         this.extensions = List.copyOf(extensions);
@@ -69,10 +61,6 @@ public final class ItchFormat implements ConfiguredRecordFormat {
         }
         this.config = new ItchReadConfig(symbolSet, typeSet, bound(fromNanos, fromAttribute), bound(toNanos, toAttribute));
         this.config.validate();
-        this.contentCodings = List.copyOf(contentCodings);
-        this.hintMetadata = extensions.isEmpty()
-                ? List.of()
-                : List.of(FormatHintMetadata.Companion.structured(structuredFamily, extensions, List.of()));
     }
 
 
@@ -96,13 +84,6 @@ public final class ItchFormat implements ConfiguredRecordFormat {
     }
 
 
-    @NotNull
-    @Override
-    public List<FormatHintMetadata> getHintMetadata() {
-        return hintMetadata;
-    }
-
-
     @Nullable
     @Override
     public String getAuthoringCapabilityIdentity() {
@@ -119,19 +100,10 @@ public final class ItchFormat implements ConfiguredRecordFormat {
     @NotNull
     @Override
     public ResolvedReadSpec resolvedRead(@NotNull DataRef ref) {
-        List<ContentCodingSpec> codings = new ArrayList<>();
-        if (!contentCodings.isEmpty()) {
-            for (String coding : contentCodings) {
-                codings.add(new ContentCodingSpec(coding));
-            }
-        }
-        else if (ref.getId().toLowerCase(Locale.ROOT).endsWith(".gz")) {
-            codings.add(ContentCodingSpec.Companion.getGzip());
-        }
-        else {
-            codings.add(ContentCodingSpec.Companion.getIdentity());
-        }
-        return new ResolvedReadSpec(ItchReaderCapability.identity, codings, config.encode());
+        return new ResolvedReadSpec(
+                ItchReaderCapability.identity,
+                List.of(FileFormatNames.INSTANCE.contentCoding(ref.getId())),
+                config.encode());
     }
 
 
@@ -146,10 +118,6 @@ public final class ItchFormat implements ConfiguredRecordFormat {
     public void digest(@NotNull Digest.Sink sink) {
         sink.addUtf8(title);
         sink.addDigestible(config.encode());
-        sink.addInt(contentCodings.size());
-        for (String coding : contentCodings) {
-            sink.addUtf8(coding);
-        }
     }
 
 

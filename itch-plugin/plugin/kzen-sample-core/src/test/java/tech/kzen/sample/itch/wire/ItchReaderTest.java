@@ -55,6 +55,22 @@ class ItchReaderTest {
 
 
     @Test
+    void gzipIsChosenByTheNameNeverByTheBytes() throws IOException {
+        SyntheticItchDay day = SyntheticItchDay.generate(seed, 5);
+        Path unnamed = temp.resolve("compressed.itch");
+        day.writeTo(unnamed, true);
+        assertThrows(ItchFormatException.class, () -> new ItchReader(unnamed).forEach(message -> {}),
+                "gzip bytes without a .gz name are framed as a raw feed");
+
+        Path upper = temp.resolve("DAY.ITCH.GZ");
+        day.writeTo(upper, true);
+        List<ItchMessage> read = new ArrayList<>();
+        new ItchReader(upper).forEach(read::add);
+        assertEquals(day.messages(), read, "the suffix is matched case-insensitively");
+    }
+
+
+    @Test
     void truncatedFeedFailsByNameAndReleasesTheFile() throws IOException {
         SyntheticItchDay day = SyntheticItchDay.generate(seed, 5);
         Path path = temp.resolve("truncated.itch");

@@ -3,18 +3,13 @@ package tech.kzen.sample.plugin.itch;
 import tech.kzen.auto.common.data.format.FormatMaterializationRequest;
 import tech.kzen.auto.common.data.format.FormatMaterializationResult;
 import tech.kzen.auto.common.data.read.ContentCapabilityIdentity;
-import tech.kzen.auto.common.data.read.ContentCodingSpec;
 import tech.kzen.auto.common.data.read.ReaderCapabilityIdentity;
 import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.lib.common.exec.data.shape.DataShape;
 import tech.kzen.auto.plugin.api.data.BlockingReaderCapability;
-import tech.kzen.auto.plugin.api.data.BlockingReaderProbe;
 import tech.kzen.auto.plugin.api.data.FormatAuthoringCapability;
 import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
 import tech.kzen.auto.plugin.api.data.ReaderOpenRequest;
-import tech.kzen.auto.plugin.api.data.ReaderProbeRequest;
-import tech.kzen.auto.plugin.api.data.ReaderProbeResult;
-import tech.kzen.auto.plugin.api.data.ReaderProbeStrength;
 import tech.kzen.lib.common.exec.ExecutionValue;
 import tech.kzen.lib.common.exec.data.shape.ShapeProvenance;
 import tech.kzen.lib.common.exec.data.shape.ShapeStability;
@@ -24,49 +19,32 @@ import tech.kzen.lib.common.model.structure.notation.ListAttributeNotation;
 import tech.kzen.lib.common.model.structure.notation.MapAttributeNotation;
 import tech.kzen.lib.common.model.structure.notation.ScalarAttributeNotation;
 import tech.kzen.lib.platform.collect.PersistentCollectionsKt;
-import tech.kzen.sample.itch.message.ItchMessage;
-import tech.kzen.sample.itch.wire.ItchDecoder;
-import tech.kzen.sample.itch.wire.ItchFormatException;
-import tech.kzen.sample.itch.wire.ItchFrameInput;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeSet;
 
 
 /**
  * The NASDAQ TotalView-ITCH 5.0 reader as a kzen plugin capability, written in plain Java over the core:
  * a {@link BlockingReaderCapability} (config decode / validate / canonicalize / encode, sequential-byte
- * content, a blocking cursor of {@link ItchRow} records, bounded inspection), a {@link BlockingReaderProbe}
- * (automatic detection by framing a bounded sample — never by file name alone) and a
- * {@link FormatAuthoringCapability} (materializing a detected or corrected format as a concrete
- * {@code ItchFormat} document). Compressed feeds are the host's content coding: the bytes this reader gets
- * are already inflated, and it declares no framing from an extension.
+ * content, a blocking cursor of {@link ItchRow} records, bounded inspection) and a
+ * {@link FormatAuthoringCapability} (materializing a corrected format as a concrete {@code ItchFormat}
+ * document). Compressed feeds are the host's content coding, chosen by the file name: the bytes this reader
+ * gets are already inflated.
  */
 public final class ItchReaderCapability
         extends BlockingReaderCapability
-        implements BlockingReaderProbe, FormatAuthoringCapability
+        implements FormatAuthoringCapability
 {
     public static final ReaderCapabilityIdentity identity = new ReaderCapabilityIdentity("tech.kzen.sample", "itch-5", "1");
     public static final String authoringIdentity = "tech.kzen.sample/itch-5-authoring-v1";
-
-    /** A sample must frame at least this many messages cleanly before it counts as ITCH. */
-    private static final int minimumProbeFrames = 2;
 
 
     @Override
     public ReaderCapabilityIdentity getIdentity() {
         return identity;
-    }
-
-
-    @Override
-    public String getReaderCompatibility() {
-        return identity.getCompatibility();
     }
 
 
@@ -143,49 +121,7 @@ public final class ItchReaderCapability
 
 
     //-----------------------------------------------------------------------------------------------------------------
-    /**
-     * Frames the (inflated) sample: a clean run of messages up to the policy's record limit is content-strong
-     * evidence; a feed that frames nothing is no match; a feed the file name claimed to be ITCH but which does
-     * not frame is a named rejection. A sample cut mid-frame is fine — what framed before the cut counts.
-     */
-    @Override
-    public ReaderProbeResult probeBlocking(ReaderProbeRequest request) {
-        ItchReadConfig candidate = itchConfig(request.getCandidateConfig());
-        byte[] sample = request.getSample().toByteArray();
-        int limit = request.getPolicy().getMaximumLogicalRecords();
-        int framed = 0;
-        TreeSet<Character> types = new TreeSet<>();
-        String failure = null;
-        try (ItchFrameInput frames = ItchFrameInput.open(new ByteArrayInputStream(sample))) {
-            while (framed < limit && frames.next()) {
-                ItchMessage message = ItchDecoder.decode(frames.frame(), 0, frames.frameLength(), frames.ordinal());
-                types.add(message.type());
-                framed++;
-            }
-        }
-        catch (ItchFormatException | IOException e) {
-            // A cut sample ends mid-frame; a corrupt one fails on its first frames
-            failure = e.getMessage();
-        }
-        request.getObserver().completeLogicalRecordsConsidered(framed);
-        boolean enough = framed >= minimumProbeFrames || framed >= 1 && request.getEndOfInput();
-        if (enough) {
-            return new ReaderProbeResult.Matched(
-                    ReaderProbeStrength.ContentStrong,
-                    candidate,
-                    framed + " ITCH 5.0 frames decoded (types " + types + ")");
-        }
-        if (request.getStructuredHint()) {
-            return new ReaderProbeResult.Rejected(
-                    "Named as ITCH but the content does not frame as ITCH 5.0" +
-                            (failure == null ? "" : ": " + failure));
-        }
-        return ReaderProbeResult.NoMatch.INSTANCE;
-    }
-
-
-    //-----------------------------------------------------------------------------------------------------------------
-    /** Materializes a detected feed as a concrete format document: the base format's identity plus this config. */
+    /** Materializes a feed's format as a concrete format document: the base format's identity plus this config. */
     @Override
     public FormatMaterializationResult materialize(FormatMaterializationRequest request) {
         if (!request.getOverrides().isEmpty()) {
@@ -208,11 +144,6 @@ public final class ItchReaderCapability
                 new ScalarAttributeNotation(config.fromNanos() == ItchReadConfig.noBound ? "" : Long.toString(config.fromNanos())));
         entries.put(AttributeSegment.Companion.ofKey(ItchFormat.toAttribute),
                 new ScalarAttributeNotation(config.toNanos() == ItchReadConfig.noBound ? "" : Long.toString(config.toNanos())));
-        List<String> codings = new ArrayList<>();
-        for (ContentCodingSpec coding : request.getResolvedRead().getContentCodings()) {
-            codings.add(coding.getIdentity());
-        }
-        entries.put(AttributeSegment.Companion.ofKey(ItchFormat.contentCodingsAttribute), texts(codings));
         return new FormatMaterializationResult(
                 new MapAttributeNotation(PersistentCollectionsKt.toPersistentMap(entries)),
                 null,

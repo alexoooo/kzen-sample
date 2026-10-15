@@ -111,7 +111,7 @@ public final class ItchStoreBuilder {
         long messages = 0;
 
         try (PartitionWriters writers = new PartitionWriters(partitions, bufferBudgetBytes);
-             ItchFrameInput frames = ItchFrameInput.open(Files.newInputStream(source))) {
+             ItchFrameInput frames = ItchFrameInput.open(source)) {
             while (frames.next()) {
                 long ordinal = frames.ordinal();
                 if (!proceed.test(ordinal)) {

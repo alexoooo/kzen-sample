@@ -1,11 +1,11 @@
 # The sample plugin's record formats, registered as graph objects of the host's ConfiguredRecordFormat archetype
 # (bundled notation: merged into every workspace this plugin folder is installed in). Each names its reader by
-# class; the reader itself is discovered through META-INF/services. Automatic detection considers a format
-# through its reader's probe — by content, never by file name alone.
+# class; the reader itself is discovered through META-INF/services. Automatic chooses a format by the file
+# name's extension (and gzip by a .gz suffix), never by its content.
 
-# NASDAQ TotalView-ITCH 5.0: a binary feed of length-prefixed messages; gzip sources read through the host's
-# content coding. The attributes are the reader's config: symbols and message types to admit (empty = all) and a
-# time-of-day window in nanoseconds since midnight (blank = open).
+# NASDAQ TotalView-ITCH 5.0: a binary feed of length-prefixed messages, named .itch or .nasdaq_itch50; a .gz
+# name reads through the host's gzip content coding. The attributes are the reader's config: symbols and
+# message types to admit (empty = all) and a time-of-day window in nanoseconds since midnight (blank = open).
 ItchFormat:
   abstract: true
   is: ConfiguredRecordFormat
@@ -19,7 +19,6 @@ ItchFormat:
   messageTypes: []
   fromNanos: ""
   toNanos: ""
-  contentCodings: []
   meta:
     symbols:
       is: List
@@ -29,16 +28,14 @@ ItchFormat:
       of: String
     fromNanos: String
     toNanos: String
-    contentCodings:
-      is: List
-      of: String
 
 ItchDay:
   is: ItchFormat
   title: "NASDAQ ITCH 5.0 day"
 
 
-# The world-cities population file: no configuration; detected by its header row.
+# The world-cities population file: no configuration and no extension (it is a .txt), so it is selected
+# explicitly.
 WorldCitiesFormat:
   abstract: true
   is: ConfiguredRecordFormat

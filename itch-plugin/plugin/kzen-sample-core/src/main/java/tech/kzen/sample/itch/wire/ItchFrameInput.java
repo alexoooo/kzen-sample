@@ -4,19 +4,20 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
 import java.util.zip.GZIPInputStream;
 
 
 /**
- * Strict length-prefixed framing over a raw or gzip-compressed ITCH feed: {@code [2-byte length][message]}
- * repeated. The feed may end only at a frame boundary; a partial length prefix or a partial message is a
+ * Strict length-prefixed framing over an ITCH feed: {@code [2-byte length][message]} repeated. A file is
+ * inflated when its name ends in {@code .gz}, never by looking at its bytes. The feed may end only at a frame boundary; a partial length prefix or a partial message is a
  * truncation error, and a zero length is a bad length. Decoding is separate ({@link ItchDecoder}), so the
  * frame buffer is the only live wire object and is reused between frames.
  */
 public final class ItchFrameInput implements AutoCloseable {
-    private static final int gzipMagicFirst = 0x1f;
-    private static final int gzipMagicSecond = 0x8b;
-    private static final int lengthPrefixBytes = 2;
+    private static final String gzipSuffix = ".gz";
     private static final int maximumFrameLength = 0xFFFF;
     private static final int readAheadBytes = 1 << 16;
 
@@ -27,17 +28,26 @@ public final class ItchFrameInput implements AutoCloseable {
     private int frameLength = -1;
 
 
-    /** Wraps [stream], transparently inflating a gzip feed (detected by its magic bytes). */
-    public static ItchFrameInput open(InputStream stream) throws IOException {
-        BufferedInputStream buffered = new BufferedInputStream(stream, readAheadBytes);
-        buffered.mark(lengthPrefixBytes);
-        int first = buffered.read();
-        int second = buffered.read();
-        buffered.reset();
-        if (first == gzipMagicFirst && second == gzipMagicSecond) {
-            return new ItchFrameInput(new BufferedInputStream(new GZIPInputStream(buffered, readAheadBytes), readAheadBytes));
+    /** Opens the feed file at [path], inflating it when its name ends in {@code .gz}. */
+    public static ItchFrameInput open(Path path) throws IOException {
+        InputStream file = Files.newInputStream(path);
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (!name.endsWith(gzipSuffix)) {
+            return open(file);
         }
-        return new ItchFrameInput(buffered);
+        try {
+            return open(new GZIPInputStream(file, readAheadBytes));
+        }
+        catch (IOException e) {
+            file.close();
+            throw e;
+        }
+    }
+
+
+    /** Wraps [stream], whose bytes are the raw feed (any compression already removed by the caller). */
+    public static ItchFrameInput open(InputStream stream) {
+        return new ItchFrameInput(new BufferedInputStream(stream, readAheadBytes));
     }
 
 

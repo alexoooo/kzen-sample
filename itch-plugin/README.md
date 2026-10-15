@@ -12,10 +12,11 @@ Example plugin for kzen over NASDAQ TotalView-ITCH market data. It has one part,
   `kzen-auto-jvm` likewise, for the Java Worker bases only): two Job readers, five analytical Workers, their
   bundled notation and ready-made Job templates over the core. `ItchReaderCapability` reads a TotalView-ITCH 5.0
   feed (raw or `.gz` through the host's gzip content coding) into flat typed rows with symbol / message-type /
-  time-window filters, bounded shape inspection, content-based detection (the framing must decode — an
-  extension alone never claims binary) and an authoring capability so a File source can materialize a
-  configured `ItchFormat` object; `WorldCitiesReaderCapability` is the minimal `BlockingReaderCapability`
-  sample (no configuration, detected by its header row). Both are registered in
+  time-window filters, bounded shape inspection and an authoring capability so a File source can materialize
+  a configured `ItchFormat` object; `WorldCitiesReaderCapability` is the minimal `BlockingReaderCapability`
+  sample (no configuration). As everywhere in kzen, a file's name, never its content, decides how it is read:
+  the `ItchFormat` declares the `.itch` / `.nasdaq_itch50` extensions, and the world-cities format declares
+  none, so it is picked explicitly. Both are registered in
   `META-INF/services/tech.kzen.auto.plugin.api.data.ReaderCapability`; the formats are graph objects in
   `notation/auto-jvm/kzen-sample-plugin/sample-formats.yaml`. The former `WorldCitiesPop` `ReportDefiner` and
   its `META-INF/kzen/plugins.yaml` are gone: Reports take the host's built-in definers only.
@@ -57,8 +58,9 @@ cp kzen-sample-adapter/target/kzen-sample-adapter-*.jar kzen-sample-adapter/targ
 java -jar kzen-auto-jvm-*.jar --plugin.root=<plugin root>
 ```
 
-Then a File source over a `.itch` / `.nasdaq_itch50` file (or a `.gz` of one) detects "NASDAQ ITCH 5.0" and a
-file starting with the world-cities header row detects "World cities population"; both read as Job records.
+Then a Parse on Automatic reads a `.itch` / `.nasdaq_itch50` file (or a `.gz` of one) as "NASDAQ ITCH 5.0";
+the world-cities file (a `.txt`) reads as "World cities population" once that format is selected. Both read as
+Job records.
 
 ## Ready-made Jobs
 

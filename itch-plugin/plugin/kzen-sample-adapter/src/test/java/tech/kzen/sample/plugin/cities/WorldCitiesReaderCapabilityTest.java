@@ -2,38 +2,35 @@ package tech.kzen.sample.plugin.cities;
 
 import org.junit.jupiter.api.Test;
 import tech.kzen.auto.common.data.api.DataCursor;
+import tech.kzen.auto.common.data.model.DataRef;
 import tech.kzen.auto.common.data.read.ContentCapabilityIdentity;
+import tech.kzen.auto.common.data.read.ContentCodingSpec;
 import tech.kzen.auto.common.data.read.ReaderConfig;
+import tech.kzen.auto.common.util.data.DataLocation;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
 import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
-import tech.kzen.auto.plugin.api.data.ReaderProbeResult;
-import tech.kzen.auto.plugin.api.data.ReaderProbeStrength;
 import tech.kzen.lib.common.exec.MapExecutionValue;
 import tech.kzen.lib.common.exec.data.type.DataType;
 import tech.kzen.sample.plugin.model.WcpRow;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static tech.kzen.sample.plugin.support.ReaderTestSupport.columns;
 import static tech.kzen.sample.plugin.support.ReaderTestSupport.input;
 import static tech.kzen.sample.plugin.support.ReaderTestSupport.open;
-import static tech.kzen.sample.plugin.support.ReaderTestSupport.probe;
 
 
 /**
  * The simple sample: a hand-written excerpt in the world-cities layout (no real data enters the repository)
  * read through the reader contract — header skipped, empty numbers null, ISO-8859-1 accents kept, bounded
- * inspection, content-based probe.
+ * inspection, and a format chosen only explicitly, its compression by the file name.
  */
 class WorldCitiesReaderCapabilityTest {
     private static final String excerpt = String.join("\n",
@@ -55,7 +52,6 @@ class WorldCitiesReaderCapabilityTest {
         assertEquals(new MapExecutionValue(Map.of()), reader.encode(config));
         assertEquals(ContentCapabilityIdentity.Companion.getSequentialBytes(), reader.requiredContent(config));
         assertEquals("tech.kzen.sample", reader.getIdentity().getNamespace());
-        assertEquals(reader.getIdentity().getCompatibility(), reader.getReaderCompatibility());
     }
 
 
@@ -101,20 +97,13 @@ class WorldCitiesReaderCapabilityTest {
 
 
     @Test
-    void probeMatchesOnHeaderRowOnly() {
-        ReaderProbeResult matched = reader.probeBlocking(probe(config(), excerptBytes(), false, false));
-        assertInstanceOf(ReaderProbeResult.Matched.class, matched);
-        assertEquals(ReaderProbeStrength.ContentSignature, ((ReaderProbeResult.Matched) matched).getStrength(),
-                "the header row is the file's signature, above a generic delimited guess");
-
-        byte[] csvAlike = "Country,City\nad,andorra\n".getBytes(StandardCharsets.ISO_8859_1);
-        assertEquals(ReaderProbeResult.NoMatch.INSTANCE, reader.probeBlocking(probe(config(), csvAlike, true, false)),
-                "a different header is some other format, whatever the extension");
-
-        byte[] truncatedHeader = Arrays.copyOf(excerptBytes(), 10);
-        assertEquals(ReaderProbeResult.NoMatch.INSTANCE, reader.probeBlocking(probe(config(), truncatedHeader, false, false)));
-        assertFalse(new WorldCitiesFormat("t", true).getExtensions().contains("txt"),
-                "no extension hint: plain .txt must stay text for everything else");
+    void formatDeclaresNoExtensionAndTakesGzipFromTheName() {
+        WorldCitiesFormat format = new WorldCitiesFormat("t", true);
+        assertTrue(format.getExtensions().isEmpty(), "plain .txt must stay text for everything else");
+        assertEquals(List.of(ContentCodingSpec.Companion.getGzip()),
+                format.resolvedRead(ref("worldcitiespop.txt.gz")).getContentCodings());
+        assertEquals(List.of(ContentCodingSpec.Companion.getIdentity()),
+                format.resolvedRead(ref("worldcitiespop.txt")).getContentCodings());
     }
 
 
@@ -148,5 +137,11 @@ class WorldCitiesReaderCapabilityTest {
 
     private static byte[] excerptBytes() {
         return excerpt.getBytes(StandardCharsets.ISO_8859_1);
+    }
+
+
+    /** A file reference by name, as a File selection would give it. */
+    private static DataRef ref(String name) {
+        return DataRef.Companion.ofLocation(DataLocation.Companion.of("/data/" + name));
     }
 }

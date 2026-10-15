@@ -4,6 +4,7 @@ import tech.kzen.sample.itch.message.ItchMessage;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.Iterator;
 
 
@@ -18,8 +19,14 @@ public interface ItchCursor extends Iterator<ItchMessage>, AutoCloseable {
     void close();
 
 
-    /** A cursor over a raw or gzip feed stream. */
-    static ItchCursor open(InputStream stream) throws IOException {
+    /** A cursor over the feed file at [path], inflated when its name ends in {@code .gz}. */
+    static ItchCursor open(Path path) throws IOException {
+        return new FrameCursor(ItchFrameInput.open(path));
+    }
+
+
+    /** A cursor over a raw feed stream. */
+    static ItchCursor open(InputStream stream) {
         return new FrameCursor(ItchFrameInput.open(stream));
     }
 

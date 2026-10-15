@@ -42,12 +42,7 @@ final class ItchDataCursor implements DataCursor {
         this.config = config;
         this.shape = shape;
         this.recordLimit = recordLimit;
-        try {
-            this.frames = ItchFrameInput.open(new ReaderByteInputStream(bytes));
-        }
-        catch (IOException e) {
-            throw new UncheckedIOException("Unable to open ITCH input", e);
-        }
+        this.frames = ItchFrameInput.open(new ReaderByteInputStream(bytes));
     }
 
 
