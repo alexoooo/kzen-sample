@@ -37,7 +37,7 @@ You can also connect ITCH directly to **Preview**. Each row shows `date`, `symbo
 
 To add a column, place **Formula** between ITCH and Preview, add `test` with expression `symbol.length`, and leave **Payload** blank. The output retains `date`, `symbol`, `sourceUrl`, and the live `day` object alongside the typed calculated column. Later Formula steps can read both the original fields and `test`. **Carry** is only needed when a Payload expression replaces the object; choose None, All, or Selected fields with optional renames.
 
-Preview retains a rolling sample bounded by both the configured item count and 8 MiB of encoded content. Each item is limited to 256 KiB, 16 levels, 200 children per container, 2,000 visited nodes, 4,096 characters per text value, and a 64-byte binary excerpt. Capture checks a 50 ms deadline between reads; it cannot interrupt a blocking getter. Unavailable or omitted branches are marked without hiding readable siblings. Expanding a cell reads only captured content.
+Preview retains a rolling sample of the configured item count. Each item is copied whole; a binary value shows a 64-byte excerpt with its size. Unavailable branches are marked without hiding readable siblings. Expanding a cell reads only captured content.
 
 Dates and symbols are saved in the Job. They are fixed during a run; stop and start a new run to change them. Download and preparation work is shared by both workspaces. Manual preparation can run without a Job.
 

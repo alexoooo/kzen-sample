@@ -8,7 +8,6 @@ import tech.kzen.auto.common.data.read.ContentCodingSpec;
 import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.auto.common.util.data.DataLocation;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
-import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
 import tech.kzen.lib.common.exec.MapExecutionValue;
 import tech.kzen.lib.common.exec.data.type.DataType;
 import tech.kzen.sample.plugin.model.WcpRow;
@@ -29,8 +28,8 @@ import static tech.kzen.sample.plugin.support.ReaderTestSupport.open;
 
 /**
  * The simple sample: a hand-written excerpt in the world-cities layout (no real data enters the repository)
- * read through the reader contract — header skipped, empty numbers null, ISO-8859-1 accents kept, bounded
- * inspection, and a format chosen only explicitly, its compression by the file name.
+ * read through the reader contract — header skipped, empty numbers null, ISO-8859-1 accents kept, a fixed
+ * shape, and a format chosen only explicitly, its compression by the file name.
  */
 class WorldCitiesReaderCapabilityTest {
     private static final String excerpt = String.join("\n",
@@ -87,8 +86,8 @@ class WorldCitiesReaderCapabilityTest {
 
 
     @Test
-    void inspectIsBoundedAndDeclaresStaticColumns() {
-        var shape = reader.inspectBlocking(new ReaderInspectionRequest(open(config(), bytes(excerpt)), 2));
+    void shapeIsFixedSoInspectionReadsNoContent() {
+        var shape = reader.fixedShape(config());
         assertEquals(WcpRow.contract(), shape.getItemType());
         assertEquals(WcpRow.header, ((DataType.Record) shape.getItemType().getStructural()).getFields()
                 .stream().map(field -> field.getId().getName()).toList());

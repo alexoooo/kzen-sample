@@ -8,7 +8,6 @@ import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.lib.common.exec.data.shape.DataShape;
 import tech.kzen.auto.plugin.api.data.BlockingReaderCapability;
 import tech.kzen.auto.plugin.api.data.FormatAuthoringCapability;
-import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
 import tech.kzen.auto.plugin.api.data.ReaderOpenRequest;
 import tech.kzen.lib.common.exec.ExecutionValue;
 import tech.kzen.lib.common.exec.data.shape.ShapeProvenance;
@@ -95,23 +94,17 @@ public final class ItchReaderCapability
 
 
     //-----------------------------------------------------------------------------------------------------------------
+    /** The columns are fixed, so inspection reads no content; a malformed feed fails by name when read. */
     @Override
-    public tech.kzen.auto.common.data.api.DataCursor openBlocking(ReaderOpenRequest request) {
-        return new ItchDataCursor(request.getBytes(), itchConfig(request.getConfig()), shape(), Long.MAX_VALUE);
+    public DataShape fixedShape(ReaderConfig config) {
+        validate(config);
+        return shape();
     }
 
 
-    /** Frames up to the record limit so a malformed feed fails by name at inspection; the shape itself is static. */
     @Override
-    public DataShape inspectBlocking(ReaderInspectionRequest request) {
-        try (var cursor = new ItchDataCursor(
-                request.getOpen().getBytes(), itchConfig(request.getOpen().getConfig()), shape(),
-                request.getMaximumRecords())) {
-            while (cursor.hasNext()) {
-                cursor.next();
-            }
-            return cursor.getShape();
-        }
+    public tech.kzen.auto.common.data.api.DataCursor openBlocking(ReaderOpenRequest request) {
+        return new ItchDataCursor(request.getBytes(), itchConfig(request.getConfig()), shape());
     }
 
 

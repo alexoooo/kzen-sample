@@ -11,7 +11,6 @@ import tech.kzen.auto.common.data.read.ContentCodingSpec;
 import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.auto.common.util.data.DataLocation;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
-import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
 import tech.kzen.lib.common.exec.ExecutionValue;
 import tech.kzen.lib.common.exec.ListExecutionValue;
 import tech.kzen.lib.common.exec.MapExecutionValue;
@@ -45,7 +44,7 @@ import static tech.kzen.sample.plugin.support.ReaderTestSupport.open;
 
 /**
  * The ITCH reader against the synthetic day: config round trip and validation, the typed projection of every
- * message (raw and, as the host inflates it, gzip), the symbol / type / time filters, bounded inspection,
+ * message (raw and, as the host inflates it, gzip), the symbol / type / time filters, a fixed shape,
  * malformed content failing by name, and the format chosen by its extensions, its compression by the name.
  */
 class ItchReaderCapabilityTest {
@@ -151,11 +150,11 @@ class ItchReaderCapabilityTest {
 
 
     @Test
-    void inspectionIsBoundedAndMalformedContentFailsByName() throws IOException {
+    void shapeIsFixedAndMalformedContentFailsByName() throws IOException {
         SyntheticItchDay day = SyntheticItchDay.generate(seed, 5);
         Path raw = temp.resolve("inspect.itch");
         day.writeTo(raw, false);
-        var shape = reader.inspectBlocking(new ReaderInspectionRequest(open(ItchReadConfig.all, input(raw)), 3));
+        var shape = reader.fixedShape(ItchReadConfig.all);
         assertEquals(ItchRow.contract(), shape.getItemType());
         assertEquals(ItchRow.columns, ((DataType.Record) shape.getItemType().getStructural()).getFields()
                 .stream().map(f -> f.getId().getName()).toList());

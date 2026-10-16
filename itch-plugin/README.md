@@ -12,7 +12,7 @@ Example plugin for kzen over NASDAQ TotalView-ITCH market data. It has one part,
   `kzen-auto-jvm` likewise, for the Java Worker bases only): two Job readers, five analytical Workers, their
   bundled notation and ready-made Job templates over the core. `ItchReaderCapability` reads a TotalView-ITCH 5.0
   feed (raw or `.gz` through the host's gzip content coding) into flat typed rows with symbol / message-type /
-  time-window filters, bounded shape inspection and an authoring capability so a File source can materialize
+  time-window filters, a fixed shape and an authoring capability so a File source can materialize
   a configured `ItchFormat` object; `WorldCitiesReaderCapability` is the minimal `BlockingReaderCapability`
   sample (no configuration). As everywhere in kzen, a file's name, never its content, decides how it is read:
   the `ItchFormat` declares the `.itch` / `.nasdaq_itch50` extensions, and the world-cities format declares

@@ -7,7 +7,6 @@ import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.lib.common.exec.data.shape.DataShape;
 import tech.kzen.auto.plugin.api.data.BlockingReaderCapability;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
-import tech.kzen.auto.plugin.api.data.ReaderInspectionRequest;
 import tech.kzen.auto.plugin.api.data.ReaderOpenRequest;
 import tech.kzen.lib.common.exec.ExecutionValue;
 import tech.kzen.lib.common.exec.MapExecutionValue;
@@ -80,35 +79,28 @@ public final class WorldCitiesReaderCapability extends BlockingReaderCapability 
     }
 
 
+    /** The columns are fixed, so inspection reads no content. */
     @Override
-    public DataCursor openBlocking(ReaderOpenRequest request) {
-        return new Cursor(request.getBytes(), Long.MAX_VALUE);
+    public DataShape fixedShape(ReaderConfig config) {
+        return shape();
     }
 
 
     @Override
-    public DataShape inspectBlocking(ReaderInspectionRequest request) {
-        try (Cursor cursor = new Cursor(request.getOpen().getBytes(), request.getMaximumRecords())) {
-            while (cursor.hasNext()) {
-                cursor.next();
-            }
-            return cursor.getShape();
-        }
+    public DataCursor openBlocking(ReaderOpenRequest request) {
+        return new Cursor(request.getBytes());
     }
 
 
     //-----------------------------------------------------------------------------------------------------------------
     private static final class Cursor implements DataCursor {
         private final BufferedReader lines;
-        private final long recordLimit;
         private String pending;
-        private long delivered;
         private boolean headerSeen;
         private boolean closed;
 
-        Cursor(ReaderByteInput bytes, long recordLimit) {
+        Cursor(ReaderByteInput bytes) {
             this.lines = new BufferedReader(new InputStreamReader(new ReaderByteInputStream(bytes), StandardCharsets.ISO_8859_1));
-            this.recordLimit = recordLimit;
         }
 
         @Override
@@ -118,7 +110,7 @@ public final class WorldCitiesReaderCapability extends BlockingReaderCapability 
 
         @Override
         public boolean hasNext() {
-            if (closed || delivered >= recordLimit) {
+            if (closed) {
                 return false;
             }
             try {
@@ -149,7 +141,6 @@ public final class WorldCitiesReaderCapability extends BlockingReaderCapability 
             }
             String line = pending;
             pending = null;
-            delivered++;
             return LiteralRecords.row(WcpRow.contract(), WcpRow.parse(line).asColumns());
         }
 

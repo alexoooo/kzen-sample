@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import tech.kzen.lib.common.exec.data.type.DataType;
 import tech.kzen.lib.common.exec.MapExecutionValue;
 import tech.kzen.lib.common.exec.data.value.DataSnapshot;
-import tech.kzen.lib.common.exec.data.value.SnapshotPolicy;
 import tech.kzen.lib.common.exec.data.value.SnapshotResult;
 import tech.kzen.lib.common.exec.data.value.DefaultDataAdapterRegistry;
 import tech.kzen.sample.itch.message.ItchMessage;
@@ -43,7 +42,7 @@ class ItchMessageContractTest {
     }
 
     private static MapExecutionValue snapshot(tech.kzen.lib.common.exec.data.value.DataValue value) {
-        var result = DataSnapshot.Companion.capture(value, new SnapshotPolicy(), false);
+        var result = DataSnapshot.Companion.capture(value, false);
         assertInstanceOf(SnapshotResult.Complete.class, result, result.toString());
         return (MapExecutionValue) ((SnapshotResult.Complete) result).getSnapshot().getValue();
     }

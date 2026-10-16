@@ -1,6 +1,5 @@
 package tech.kzen.sample.plugin.support;
 
-import tech.kzen.auto.common.data.read.ReadOperationalPolicy;
 import tech.kzen.auto.common.data.read.ReaderConfig;
 import tech.kzen.auto.plugin.api.data.ReaderByteInput;
 import tech.kzen.auto.plugin.api.data.ReaderOpenRequest;
@@ -15,8 +14,6 @@ import tech.kzen.lib.common.exec.data.type.DataType;
 import tech.kzen.lib.common.exec.data.type.ScalarKind;
 import tech.kzen.lib.common.exec.data.value.DataSnapshot;
 import tech.kzen.lib.common.exec.data.value.DataValue;
-import tech.kzen.lib.common.exec.data.value.SensitiveSnapshotPolicy;
-import tech.kzen.lib.common.exec.data.value.SnapshotPolicy;
 import tech.kzen.lib.common.exec.data.value.SnapshotResult;
 
 import java.io.ByteArrayInputStream;
@@ -31,15 +28,15 @@ import java.util.zip.GZIPInputStream;
 
 /**
  * What the host would hand a reader, built by hand for the reader tests: a sequential byte input over a
- * byte array (gzip sources inflated first, as the host's content coding does), the open request with a
- * neutral policy, and a flat read of a scalar-only record row.
+ * byte array (gzip sources inflated first, as the host's content coding does), the open request, and a
+ * flat read of a scalar-only record row.
  */
 public final class ReaderTestSupport {
     private ReaderTestSupport() {}
 
 
     public static ReaderOpenRequest open(ReaderConfig config, ReaderByteInput input) {
-        return new ReaderOpenRequest("test", null, config, input, new ReadOperationalPolicy(null, null, null, null, null));
+        return new ReaderOpenRequest("test", null, config, input);
     }
 
 
@@ -60,11 +57,6 @@ public final class ReaderTestSupport {
             private int position = 0;
 
             @Override
-            public long getExpandedBytesRead() {
-                return position;
-            }
-
-            @Override
             public int read(byte[] buffer, int offset, int length) {
                 if (length == 0) return 0;
                 if (position >= bytes.length) return -1;
@@ -83,8 +75,7 @@ public final class ReaderTestSupport {
      * decides): integers as Long, floating as Double, text as String, absent as null.
      */
     public static Map<String, Object> columns(DataValue value) {
-        SnapshotResult captured = DataSnapshot.Companion.capture(value, new SnapshotPolicy(
-                64, 100_000, 1_000_000, 10_000_000, 5_000, SensitiveSnapshotPolicy.Redact), false);
+        SnapshotResult captured = DataSnapshot.Companion.capture(value, false);
         if (! (captured instanceof SnapshotResult.Complete complete)) {
             throw new IllegalStateException("Row snapshot failed: " + captured);
         }

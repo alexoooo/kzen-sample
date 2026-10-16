@@ -29,19 +29,16 @@ final class ItchDataCursor implements DataCursor {
     private final ItchFrameInput frames;
     private final ItchReadConfig config;
     private final DataShape shape;
-    private final long recordLimit;
     private final Map<Integer, String> symbolByLocate = new HashMap<>();
 
     private ItchMessage pending;
-    private long delivered;
     private boolean exhausted;
     private boolean closed;
 
 
-    ItchDataCursor(ReaderByteInput bytes, ItchReadConfig config, DataShape shape, long recordLimit) {
+    ItchDataCursor(ReaderByteInput bytes, ItchReadConfig config, DataShape shape) {
         this.config = config;
         this.shape = shape;
-        this.recordLimit = recordLimit;
         this.frames = ItchFrameInput.open(new ReaderByteInputStream(bytes));
     }
 
@@ -54,7 +51,7 @@ final class ItchDataCursor implements DataCursor {
 
     @Override
     public boolean hasNext() {
-        if (closed || exhausted || delivered >= recordLimit) {
+        if (closed || exhausted) {
             return false;
         }
         while (pending == null) {
@@ -81,7 +78,6 @@ final class ItchDataCursor implements DataCursor {
         }
         ItchMessage message = pending;
         pending = null;
-        delivered++;
         Map<String, Object> row = ItchRow.project(message, symbolByLocate::get);
         return LiteralRecords.row(shape.getItemType(), row);
     }
