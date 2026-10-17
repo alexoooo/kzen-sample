@@ -94,6 +94,7 @@ public final class KzenWorkspace {
                 null,
                 null,
                 workRoot,
+                null,
                 services,
                 false));
         try {
